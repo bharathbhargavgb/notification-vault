@@ -25,6 +25,16 @@ class NotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + job)
     private lateinit var notificationDao: NotificationDao
 
+    // Cache for the last processed notification's details
+    private var lastNotificationAppName: String? = null
+    private var lastNotificationTitle: String? = null
+    private var lastNotificationText: String? = null
+    private var lastNotificationTimestamp: Long = 0L
+
+    // Debounce period in milliseconds to handle rapid-fire identical notifications
+    // (e.g., some apps might post the exact same notification multiple times in quick succession)
+    private val DEBOUNCE_PERIOD_MS = 500 // 0.5 seconds, adjust as needed
+
     override fun onCreate() {
         super.onCreate()
         notificationDao = AppDatabase.getDatabase(applicationContext).notificationDao()
@@ -54,6 +64,30 @@ class NotificationListenerService : NotificationListenerService() {
                 Log.d(TAG, "Skipping notification with no title or text from $appName")
                 return
             }
+
+            val isPotentiallyDuplicate = appName == lastNotificationAppName &&
+                                                    title == lastNotificationTitle &&
+                                                    text == lastNotificationText &&
+                                                    postTimeMillis == lastNotificationTimestamp
+
+            // Further debounce check: if the timestamp is the same OR very close (within debounce period)
+            // This helps with apps that might post with slightly different but effectively same timestamps in rapid succession.
+            val isEffectivelySameTime = postTimeMillis == lastNotificationTimestamp ||
+                                        (Math.abs(postTimeMillis - lastNotificationTimestamp) < DEBOUNCE_PERIOD_MS &&
+                                                appName == lastNotificationAppName && // only consider debounce for same app
+                                                title == lastNotificationTitle && text == lastNotificationText)
+
+
+            if (isPotentiallyDuplicate || isEffectivelySameTime) {
+                Log.i("MyNotificationListener", "Duplicate notification ignored: $appName - $title (Timestamp: $postTimeMillis)")
+                return // Ignore this notification
+            }
+
+            // Not a duplicate, update the cache with current notification details
+            lastNotificationAppName = appName
+            lastNotificationTitle = title
+            lastNotificationText = text
+            lastNotificationTimestamp = postTimeMillis
 
             val capturedNotification = CapturedNotification(
                 appName = appName,
