@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">NotificationVault</string>
+    <string name="notification_listener_service_label">My Notification Listener</string>
+    <string name="action_settings">Settings</string>
+    <string name="notification_access_required_title">Notification Access Required</string>
+    <string name="notification_access_required_message">This app needs access to your notifications
+        to store and display them. Please grant access in settings.
+    </string>
+    <string name="open_settings_button">Open Settings</string>
+    <string name="all_apps_filter">All Apps</string>
+    <string name="filter_by_app_description">Filter by app</string>
+    <string name="notifications_screen_title">Notifications (Last 7 Days)</string>
+    <string name="no_notifications_message">No notifications recorded in the last 7 days, or none
+        matching the current filter.
+    </string>
+</resources>
