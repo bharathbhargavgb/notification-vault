@@ -18,6 +18,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Notifications
@@ -28,6 +40,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.setValue
@@ -186,6 +199,11 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
 
+    val isSelectionModeActive by viewModel.isSelectionModeActive.collectAsState()
+    val selectedNotificationIds = viewModel.selectedNotificationIds // Observe the SnapshotStateList
+
+    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+
     // State for the overflow menu
     var showOverflowMenu by remember { mutableStateOf(false) }
     // State for the confirmation dialog
@@ -244,140 +262,57 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
         )
     }
 
+    if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_selected_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_selected_message, selectedNotificationIds.size)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSelectedNotifications()
+                        showDeleteSelectedDialog = false
+                    }
+                ) {
+                    Text(stringResource(id = R.string.delete_button_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) {
+                    Text(stringResource(id = R.string.cancel_button))
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    if (!isSearchActive) {
-                        Text(stringResource(id = R.string.notifications_screen_title))
+            if (isSelectionModeActive) {
+                SelectionModeTopAppBar(
+                    selectedItemCount = selectedNotificationIds.size,
+                    onCloseSelectionMode = { viewModel.toggleSelectionMode() },
+                    onDeleteSelected = { showDeleteSelectedDialog = true },
+                    onSelectAll = {
+                        val allVisibleIds = notifications.map { it.id } // Get IDs of currently visible/filtered notifications
+                        viewModel.selectAllVisible(allVisibleIds)
                     }
-                },
-                actions = {
-                    // Search Field or Icon logic (as before)
-                    if (isSearchActive) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(focusRequester)
-                                .padding(end = 8.dp),
-                            placeholder = { Text("Search...") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                keyboardController?.hide()
-                                focusManager.clearFocus()
-                            }),
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    if (searchQuery.isNotEmpty()) {
-                                        searchQuery = ""
-                                    } else {
-                                        isSearchActive = false
-                                    }
-                                }) {
-                                    Icon(
-                                        Icons.Filled.Close,
-                                        contentDescription = if (searchQuery.isNotEmpty()) stringResource(id = R.string.clear_search_description) else stringResource(id = R.string.close_search_description)
-                                    )
-                                }
-                            },
-                            colors = TextFieldDefaults.colors(/*...your colors...*/)
-                        )
-                    }
-
-                    if (!isSearchActive) {
-                        IconButton(onClick = { isSearchActive = true }) {
-                            Icon(
-                                Icons.Filled.Search,
-                                contentDescription = stringResource(id = R.string.open_search_description)
-                            )
-                        }
-                    }
-
-                    // App Filter Dropdown (as before)
-                    Box {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!isSearchActive) {
-                                Text(
-                                    selectedAppNameForFilter?.take(10)
-                                        ?: stringResource(id = R.string.all_apps_filter_short),
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    modifier = Modifier.padding(start = 4.dp, end = 0.dp)
-                                )
-                            }
-                            IconButton(onClick = { filterDropdownExpanded = true }) {
-                                Icon(
-                                    Icons.Default.ArrowDropDown,
-                                    contentDescription = stringResource(id = R.string.filter_by_app_description)
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = filterDropdownExpanded,
-                            onDismissRequest = { filterDropdownExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(id = R.string.all_apps_filter)) },
-                                onClick = {
-                                    selectedAppNameForFilter = null
-                                    viewModel.setAppFilter(null)
-                                    filterDropdownExpanded = false
-                                }
-                            )
-                            appNamesForFilter.forEach { appName ->
-                                DropdownMenuItem(
-                                    text = { Text(appName) },
-                                    onClick = {
-                                        selectedAppNameForFilter = appName
-                                        viewModel.setAppFilter(appName)
-                                        filterDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // Overflow Menu
-                    if (!isSearchActive) { // Only show overflow if search is not active
-                        Box {
-                            IconButton(onClick = { showOverflowMenu = true }) {
-                                Icon(
-                                    Icons.Filled.MoreVert,
-                                    contentDescription = stringResource(id = R.string.more_options_description)
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(id = R.string.delete_all_notifications_menu_item)) },
-                                    onClick = {
-                                        showOverflowMenu = false
-                                        showDeleteAllDialog = true // Show confirmation dialog
-                                    },
-                                    leadingIcon = { // Optional icon for the menu item
-                                        Icon(
-                                            Icons.Filled.DeleteSweep,
-                                            contentDescription = null
-                                        )
-                                    }
-                                )
-                                // Add more menu items here if needed
-                            }
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
-            )
+            } else {
+                // Regular TopAppBar (as you had before with search, filter, overflow menu)
+                DefaultTopAppBar(
+                    viewModel = viewModel,
+                    isSearchActive = isSearchActive,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    onSearchActiveChange = { isSearchActive = it },
+                    appNamesForFilter = appNamesForFilter,
+                    selectedAppNameForFilter = selectedAppNameForFilter,
+                    onSelectedAppNameForFilterChange = { selectedAppNameForFilter = it },
+                    filterDropdownExpanded = filterDropdownExpanded,
+                    onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
+                    onShowDeleteAllDialog = { showDeleteAllDialog = true }
+                )
+            }
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
@@ -397,14 +332,25 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                     )
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize()
-                ) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(notifications, key = { it.id }) { notification ->
+                        val isSelected = selectedNotificationIds.contains(notification.id)
                         NotificationItem(
                             notification = notification,
                             context = context,
-                            searchQuery = if (searchQuery.isNotBlank()) searchQuery else null
+                            searchQuery = if (searchQuery.isNotBlank()) searchQuery else null,
+                            isSelected = isSelected,
+                            isSelectionModeActive = isSelectionModeActive,
+                            onItemClick = {
+                                if (isSelectionModeActive) {
+                                    viewModel.toggleNotificationSelection(notification.id)
+                                } else {
+                                    // Handle regular click if needed (e.g., open details)
+                                }
+                            },
+                            onItemLongClick = {
+                                viewModel.activateSelectionMode(notification.id)
+                            }
                         )
                         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                     }
@@ -414,8 +360,201 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotificationItem(notification: CapturedNotification, context: Context, searchQuery: String? = null) {
+fun DefaultTopAppBar(
+    viewModel: NotificationViewModel,
+    isSearchActive: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onSearchActiveChange: (Boolean) -> Unit,
+    appNamesForFilter: List<String>,
+    selectedAppNameForFilter: String?,
+    onSelectedAppNameForFilterChange: (String?) -> Unit,
+    filterDropdownExpanded: Boolean,
+    onFilterDropdownExpandedChange: (Boolean) -> Unit,
+    onShowDeleteAllDialog: () -> Unit
+    // Removed unused state from the argument list
+) {
+    var showOverflowMenu by remember { mutableStateOf(false) } // Keep overflow menu state local to this app bar
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    TopAppBar(
+        title = {
+            if (!isSearchActive) {
+                Text(stringResource(id = R.string.notifications_screen_title))
+            }
+        },
+        actions = {
+            // Search Field or Icon logic
+            if (isSearchActive) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester)
+                        .padding(end = 8.dp),
+                    placeholder = { Text("Search...") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    }),
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            if (searchQuery.isNotEmpty()) {
+                                onSearchQueryChange("")
+                            } else {
+                                onSearchActiveChange(false)
+                            }
+                        }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = if (searchQuery.isNotEmpty()) stringResource(id = R.string.clear_search_description) else stringResource(
+                                    id = R.string.close_search_description
+                                )
+                            )
+                        }
+                    },
+                    colors = TextFieldDefaults.colors(/*...your colors...*/)
+                )
+            }
+
+            if (!isSearchActive) {
+                IconButton(onClick = { onSearchActiveChange(true) }) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = stringResource(id = R.string.open_search_description)
+                    )
+                }
+            }
+
+            // App Filter Dropdown
+            Box {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!isSearchActive) {
+                        Text(
+                            selectedAppNameForFilter?.take(10)
+                                ?: stringResource(id = R.string.all_apps_filter_short),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 4.dp, end = 0.dp)
+                        )
+                    }
+                    IconButton(onClick = { onFilterDropdownExpandedChange(true) }) {
+                        Icon(
+                            Icons.Default.ArrowDropDown,
+                            contentDescription = stringResource(id = R.string.filter_by_app_description)
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = filterDropdownExpanded,
+                    onDismissRequest = { onFilterDropdownExpandedChange(false) }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(id = R.string.all_apps_filter)) },
+                        onClick = {
+                            onSelectedAppNameForFilterChange(null)
+                            viewModel.setAppFilter(null)
+                            onFilterDropdownExpandedChange(false)
+                        }
+                    )
+                    appNamesForFilter.forEach { appName ->
+                        DropdownMenuItem(
+                            text = { Text(appName) },
+                            onClick = {
+                                onSelectedAppNameForFilterChange(appName)
+                                viewModel.setAppFilter(appName)
+                                onFilterDropdownExpandedChange(false)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Overflow Menu
+            if (!isSearchActive) {
+                Box {
+                    IconButton(onClick = { showOverflowMenu = true }) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = stringResource(id = R.string.more_options_description)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(id = R.string.delete_all_notifications_menu_item)) },
+                            onClick = {
+                                showOverflowMenu = false
+                                onShowDeleteAllDialog() // Show confirmation dialog
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Filled.DeleteSweep, contentDescription = null)
+                            }
+                        )
+                    }
+                }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.primary,
+            titleContentColor = MaterialTheme.colorScheme.onPrimary,
+            actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+        )
+    )
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SelectionModeTopAppBar(
+    selectedItemCount: Int,
+    onCloseSelectionMode: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onSelectAll: () -> Unit
+) {
+    TopAppBar(
+        title = { Text(stringResource(R.string.selected_items_count, selectedItemCount)) },
+        navigationIcon = {
+            IconButton(onClick = onCloseSelectionMode) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.close_selection_mode_description))
+            }
+        },
+        actions = {
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Filled.SelectAll, contentDescription = stringResource(R.string.select_all_description))
+            }
+            IconButton(onClick = onDeleteSelected, enabled = selectedItemCount > 0) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_selected_description))
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer, // Or a distinct color for selection mode
+            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class) // For combinedClickable
+@Composable
+fun NotificationItem(
+    notification: CapturedNotification,
+    context: Context,
+    searchQuery: String?,
+    isSelected: Boolean,
+    isSelectionModeActive: Boolean,
+    onItemClick: () -> Unit,
+    onItemLongClick: () -> Unit
+) {
     var appIcon by remember { mutableStateOf<Drawable?>(null) }
 
     LaunchedEffect(notification.packageName) {
@@ -458,22 +597,33 @@ fun NotificationItem(notification: CapturedNotification, context: Context, searc
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp, horizontal = 16.dp),
-        verticalAlignment = Alignment.Top // Align to top for multi-line text
+            .combinedClickable( // Use combinedClickable for long press and regular click
+                onClick = onItemClick,
+                onLongClick = onItemLongClick
+            )
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent) // Visual feedback for selection
+            .padding(vertical = 8.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        // App Icon
-        Box(modifier = Modifier
-            .size(40.dp)
-            .padding(end = 12.dp), contentAlignment = Alignment.Center) {
-            appIcon?.let {
-                Image(
-                    bitmap = it.toBitmap().asImageBitmap(), // Convert Drawable to ImageBitmap
-                    contentDescription = "${notification.appName} icon",
-                    modifier = Modifier.size(36.dp)
-                )
-            } ?: Spacer(modifier = Modifier.size(36.dp)) // Placeholder if icon is null
+        if (isSelectionModeActive) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = { onItemClick() }, // Toggle selection on checkbox click as well
+                modifier = Modifier.padding(end = 12.dp).align(Alignment.CenterVertically),
+                colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+            )
+        } else {
+            // Your existing icon Box
+            Box(modifier = Modifier.size(40.dp).padding(end = 8.dp), contentAlignment = Alignment.Center) {
+                appIcon?.let {
+                    Image(
+                        bitmap = it.toBitmap().asImageBitmap(),
+                        contentDescription = "${notification.appName} icon",
+                        modifier = Modifier.size(36.dp)
+                    )
+                } ?: Box(modifier = Modifier.size(36.dp).align(Alignment.Center))
+            }
         }
-
 
         Column(modifier = Modifier.weight(1f)) {
             Row(
@@ -548,7 +698,60 @@ fun NotificationItemPreview() {
                 postTimeMillis = System.currentTimeMillis(),
                 postTimeString = "2023-10-27 10:00:00"
             ),
-            LocalContext.current
+            LocalContext.current,
+            null,
+            isSelected = false,
+            isSelectionModeActive = false,
+            onItemClick = {},
+            onItemLongClick = {}
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+fun NotificationItemPreviewSelectionModeActive() {
+    NotificationVaultTheme {
+        NotificationItem(
+            CapturedNotification(
+                id = 1,
+                appName = "Important News App",
+                packageName = "com.sample.app",
+                title = "Breaking News: Something Happened!",
+                textContent = "This is the detailed content of the sample notification. It can be a bit longer to see how it wraps and if the layout holds up.",
+                postTimeMillis = System.currentTimeMillis(),
+                postTimeString = "2023-10-27 10:00:00"
+            ),
+            LocalContext.current,
+            null,
+            isSelected = false,
+            isSelectionModeActive = true,
+            onItemClick = {},
+            onItemLongClick = {}
+        )
+    }
+}
+
+@Preview(showBackground = true, widthDp = 360)
+@Composable
+fun NotificationItemPreviewSelected() {
+    NotificationVaultTheme {
+        NotificationItem(
+            CapturedNotification(
+                id = 1,
+                appName = "Important News App",
+                packageName = "com.sample.app",
+                title = "Breaking News: Something Happened!",
+                textContent = "This is the detailed content of the sample notification. It can be a bit longer to see how it wraps and if the layout holds up.",
+                postTimeMillis = System.currentTimeMillis(),
+                postTimeString = "2023-10-27 10:00:00"
+            ),
+            LocalContext.current,
+            null,
+            isSelected = true,
+            isSelectionModeActive = true,
+            onItemClick = {},
+            onItemLongClick = {}
         )
     }
 }
@@ -567,7 +770,12 @@ fun NotificationItemNoContentPreview() {
                 postTimeMillis = System.currentTimeMillis(),
                 postTimeString = "2023-10-27 10:05:00"
             ),
-            LocalContext.current
+            LocalContext.current,
+            null,
+            isSelected = false,
+            isSelectionModeActive = false,
+            onItemClick = {},
+            onItemLongClick = {}
         )
     }
 }

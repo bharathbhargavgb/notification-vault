@@ -29,6 +29,9 @@ interface NotificationDao {
     @Query("DELETE FROM notifications WHERE postTimeMillis < :olderThanMillis")
     suspend fun deleteOldNotifications(olderThanMillis: Long)
 
+    @Query("DELETE FROM notifications WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
     @Query("DELETE FROM notifications") // Make sure table name matches your entity
     suspend fun deleteAll()
 }

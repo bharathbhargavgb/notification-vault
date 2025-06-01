@@ -25,4 +25,12 @@
     <string name="confirm_delete_all_message">Are you sure you want to delete all captured notifications? This action cannot be undone.</string>
     <string name="delete_all_button_confirm">Delete All</string>
     <string name="cancel_button">Cancel</string>
+
+    <string name="selected_items_count">%d selected</string>
+    <string name="close_selection_mode_description">Close selection mode</string>
+    <string name="delete_selected_description">Delete selected</string>
+    <string name="select_all_description">Select all</string>
+    <string name="confirm_delete_selected_title">Confirm Delete</string>
+    <string name="confirm_delete_selected_message">Are you sure you want to delete %d notification(s)?</string>
+    <string name="delete_button_confirm">Delete</string>
 </resources>
