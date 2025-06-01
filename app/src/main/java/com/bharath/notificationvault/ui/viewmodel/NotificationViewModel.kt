@@ -1,6 +1,7 @@
 package com.bharath.notificationvault.ui.viewmodel
 
 import androidx.lifecycle.LiveData
+import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -9,33 +10,47 @@ import androidx.lifecycle.viewModelScope
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 class NotificationViewModel(private val repository: NotificationRepository) : ViewModel() {
 
     private val _selectedAppNameFilter = MutableLiveData<String?>(null) // Filter by app name (display value)
+    private val _searchQuery = MutableLiveData<String?>(null) // For search text
 
-    val notifications: LiveData<List<CapturedNotification>> = _selectedAppNameFilter.switchMap { appName ->
-        if (appName == null) {
-            repository.allNotificationsLast7Days
-        } else {
-            // This requires a bit of a workaround if we want to filter by appName but the DAO filters by packageName.
-            // A more direct approach would be to get packageName from appName first.
-            // For simplicity in this switchMap, we'd ideally enhance repository or DAO.
-            // Let's assume for now the repository method can handle appName or we adjust.
-            // For a cleaner LiveData transformation, it's better if repository directly supports filtering by appName
-            // or we do a more complex transformation here (e.g., using MediatorLiveData).
-
-            // Simpler: ViewModel decides which repository method to call.
-            // The LiveData will update when _selectedPackageNameForQuery changes.
-            _packageNameForQuery.switchMap { pkgName ->
-                if (pkgName == null) repository.allNotificationsLast7Days
-                else repository.getNotificationsByAppLast7Days(pkgName)
-            }
-        }
-    }
     // Helper LiveData to trigger the query based on package name
     private val _packageNameForQuery = MutableLiveData<String?>(null)
 
+    // LiveData that fetches from the repository based on the app filter
+    private val notificationsFromRepository: LiveData<List<CapturedNotification>> = _packageNameForQuery.switchMap { pkgName ->
+        if (pkgName == null) {
+            repository.allNotificationsLast7Days
+        } else {
+            repository.getNotificationsByAppLast7Days(pkgName)
+        }
+    }
+
+    // MediatorLiveData to combine app filter and search filter
+    val notifications: LiveData<List<CapturedNotification>> = MediatorLiveData<List<CapturedNotification>>().apply {
+        addSource(notificationsFromRepository) { list ->
+            value = filterNotifications(list, _searchQuery.value)
+        }
+        addSource(_searchQuery) { query ->
+            value = filterNotifications(notificationsFromRepository.value, query)
+        }
+    }
+
+    private fun filterNotifications(notifications: List<CapturedNotification>?, query: String?): List<CapturedNotification> {
+        val currentList = notifications ?: emptyList()
+        if (query.isNullOrBlank()) {
+            return currentList
+        }
+        val lowerCaseQuery = query.lowercase(Locale.getDefault())
+        return currentList.filter { notification ->
+            (notification.appName.lowercase(Locale.getDefault()).contains(lowerCaseQuery)) ||
+                    (notification.title?.lowercase(Locale.getDefault())?.contains(lowerCaseQuery) == true) ||
+                    (notification.textContent?.lowercase(Locale.getDefault())?.contains(lowerCaseQuery) == true)
+        }
+    }
 
     val uniqueAppNamesForFilter: LiveData<List<String>> = repository.uniqueAppNamesForFilter
 
@@ -51,6 +66,10 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         }
     }
 
+    fun setSearchQuery(query: String?) {
+        _searchQuery.value = query
+    }
+
     fun cleanupOldNotifications() {
         viewModelScope.launch {
             repository.deleteOldNotifications()
@@ -60,6 +79,7 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     // Initialize with no filter and trigger initial load
     init {
         setAppFilter(null)
+        setSearchQuery(null)
     }
 }
 

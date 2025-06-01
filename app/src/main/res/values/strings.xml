@@ -9,8 +9,13 @@
     <string name="open_settings_button">Open Settings</string>
     <string name="all_apps_filter">All Apps</string>
     <string name="filter_by_app_description">Filter by app</string>
-    <string name="notifications_screen_title">Notifications (Last 7 Days)</string>
+    <string name="notifications_screen_title">Notifications</string>
     <string name="no_notifications_message">No notifications recorded in the last 7 days, or none
         matching the current filter.
     </string>
+    <string name="all_apps_filter_short">All</string> // For app bar
+    <string name="open_search_description">Open Search</string>
+    <string name="close_search_description">Close Search</string>
+    <string name="clear_search_description">Clear Search</string>
+    <string name="no_notifications_match_filters">No notifications match your filters.</string>
 </resources>

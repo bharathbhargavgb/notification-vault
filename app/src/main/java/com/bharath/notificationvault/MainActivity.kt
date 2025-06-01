@@ -16,18 +16,36 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,6 +58,7 @@ import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.text.append
 
 class MainActivity : ComponentActivity() {
 
@@ -154,28 +173,126 @@ fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun NotificationListScreen(viewModel: NotificationViewModel) {
     val notifications by viewModel.notifications.observeAsState(emptyList())
     val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
     var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
     var filterDropdownExpanded by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
     val context = LocalContext.current
 
-    LaunchedEffect(Unit) { // Use Unit to run only once on composition
+    LaunchedEffect(Unit) {
         viewModel.cleanupOldNotifications()
+    }
+
+    LaunchedEffect(searchQuery) {
+        viewModel.setSearchQuery(searchQuery.ifBlank { null })
+    }
+
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            try {
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (e: Exception) {
+                println("Focus request failed: ${e.message}")
+            }
+        } else {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(id = R.string.notifications_screen_title)) },
+                title = {
+                    if (!isSearchActive) {
+                        Text(stringResource(id = R.string.notifications_screen_title))
+                    }
+                },
                 actions = {
+                    if (isSearchActive) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier
+                                .weight(1f) // Takes available space
+                                .focusRequester(focusRequester)
+                                .padding(end = 8.dp),
+                            placeholder = { Text("Search...") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }),
+                            trailingIcon = {
+                                IconButton(onClick = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        searchQuery = ""
+                                    } else {
+                                        isSearchActive = false
+                                    }
+                                }) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = if (searchQuery.isNotEmpty()) stringResource(id = R.string.clear_search_description) else stringResource(id = R.string.close_search_description)
+                                    )
+                                }
+                            },
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                                unfocusedIndicatorColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.4f),
+                                cursorColor = MaterialTheme.colorScheme.onPrimary,
+                                focusedTextColor = MaterialTheme.colorScheme.onPrimary,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onPrimary,
+                                focusedPlaceholderColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
+                                focusedTrailingIconColor = MaterialTheme.colorScheme.onPrimary,
+                                unfocusedTrailingIconColor = MaterialTheme.colorScheme.onPrimary
+                            )
+                        )
+                    }
+
+                    if (!isSearchActive) {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = stringResource(id = R.string.open_search_description)
+                            )
+                        }
+                    }
+
                     Box {
-                        TextButton(onClick = { filterDropdownExpanded = true }) {
-                            Text(selectedAppNameForFilter ?: stringResource(id = R.string.all_apps_filter))
-                            Icon(Icons.Default.ArrowDropDown, contentDescription = stringResource(id = R.string.filter_by_app_description))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!isSearchActive) {
+                                Text(
+                                    selectedAppNameForFilter?.take(10)
+                                        ?: stringResource(id = R.string.all_apps_filter_short),
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier.padding(start = 4.dp, end = 0.dp)
+                                )
+                            }
+                            IconButton(onClick = { filterDropdownExpanded = true }) {
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = stringResource(id = R.string.filter_by_app_description)
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = filterDropdownExpanded,
@@ -203,32 +320,41 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
         }
     ) { paddingValues ->
-        if (notifications.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(stringResource(id = R.string.no_notifications_message))
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(horizontal = 0.dp) // Let items handle their own padding
-            ) {
-                items(notifications, key = { it.id }) { notification ->
-                    NotificationItem(notification = notification, context = context)
-                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+        Column(modifier = Modifier.padding(paddingValues)) {
+            if (notifications.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        if (searchQuery.isNotBlank() || selectedAppNameForFilter != null) {
+                            stringResource(id = R.string.no_notifications_match_filters)
+                        } else {
+                            stringResource(id = R.string.no_notifications_message)
+                        }
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(notifications, key = { it.id }) { notification ->
+                        NotificationItem(
+                            notification = notification,
+                            context = context,
+                            searchQuery = if (searchQuery.isNotBlank()) searchQuery else null
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
             }
         }
@@ -236,7 +362,7 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
 }
 
 @Composable
-fun NotificationItem(notification: CapturedNotification, context: Context) {
+fun NotificationItem(notification: CapturedNotification, context: Context, searchQuery: String? = null) {
     var appIcon by remember { mutableStateOf<Drawable?>(null) }
 
     LaunchedEffect(notification.packageName) {
@@ -248,6 +374,32 @@ fun NotificationItem(notification: CapturedNotification, context: Context) {
                 appIcon = null // Set to null if not found
             }
         }
+    }
+
+    // Helper function for highlighting
+    fun highlightText(text: String?, query: String?): AnnotatedString {
+        if (text.isNullOrBlank()) return AnnotatedString("")
+        if (query.isNullOrBlank()) return AnnotatedString(text)
+
+        val annotatedString = buildAnnotatedString {
+            var startIndex = 0
+            val lowerText = text.lowercase()
+            val lowerQuery = query.lowercase()
+
+            while (startIndex < text.length) {
+                val foundIndex = lowerText.indexOf(lowerQuery, startIndex)
+                if (foundIndex == -1) {
+                    append(text.substring(startIndex))
+                    break
+                }
+                append(text.substring(startIndex, foundIndex)) // Text before match
+                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, background = Color.Yellow.copy(alpha = 0.5f))) {
+                    append(text.substring(foundIndex, foundIndex + query.length)) // Matched text
+                }
+                startIndex = foundIndex + query.length
+            }
+        }
+        return annotatedString
     }
 
     Row(
@@ -292,7 +444,7 @@ fun NotificationItem(notification: CapturedNotification, context: Context) {
 
             notification.title?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = it,
+                    text = highlightText(it, searchQuery),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -301,7 +453,7 @@ fun NotificationItem(notification: CapturedNotification, context: Context) {
             }
             notification.textContent?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    text = it,
+                    text = highlightText(it, searchQuery),
                     fontSize = 14.sp,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
