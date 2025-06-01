@@ -9,6 +9,7 @@ import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.repository.NotificationRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -73,6 +74,15 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     fun cleanupOldNotifications() {
         viewModelScope.launch {
             repository.deleteOldNotifications()
+        }
+    }
+
+    fun deleteAllNotifications() {
+        viewModelScope.launch(Dispatchers.IO) { // Perform database operations on a background thread
+            repository.deleteAllNotifications()
+            // You might not need to explicitly update the LiveData here if your LiveData
+            // source from the repository automatically updates when the underlying data changes.
+            // If it doesn't, you might need to re-fetch or clear the current list.
         }
     }
 

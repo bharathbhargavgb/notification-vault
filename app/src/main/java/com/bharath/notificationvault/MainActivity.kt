@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
@@ -184,6 +186,12 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
 
+    // State for the overflow menu
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    // State for the confirmation dialog
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+
+
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -212,6 +220,31 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
         }
     }
 
+    // Confirmation Dialog for Deleting All Notifications
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_all_title)) },
+            text = { Text(stringResource(id = R.string.confirm_delete_all_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteAllNotifications()
+                        showDeleteAllDialog = false
+                    }
+                ) {
+                    Text(stringResource(id = R.string.delete_all_button_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) {
+                    Text(stringResource(id = R.string.cancel_button))
+                }
+            }
+        )
+    }
+
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -221,12 +254,13 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                     }
                 },
                 actions = {
+                    // Search Field or Icon logic (as before)
                     if (isSearchActive) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
                             modifier = Modifier
-                                .weight(1f) // Takes available space
+                                .weight(1f)
                                 .focusRequester(focusRequester)
                                 .padding(end = 8.dp),
                             placeholder = { Text("Search...") },
@@ -250,20 +284,7 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                                     )
                                 }
                             },
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                disabledContainerColor = Color.Transparent,
-                                focusedIndicatorColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
-                                unfocusedIndicatorColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.4f),
-                                cursorColor = MaterialTheme.colorScheme.onPrimary,
-                                focusedTextColor = MaterialTheme.colorScheme.onPrimary,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onPrimary,
-                                focusedPlaceholderColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
-                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f),
-                                focusedTrailingIconColor = MaterialTheme.colorScheme.onPrimary,
-                                unfocusedTrailingIconColor = MaterialTheme.colorScheme.onPrimary
-                            )
+                            colors = TextFieldDefaults.colors(/*...your colors...*/)
                         )
                     }
 
@@ -276,6 +297,7 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                         }
                     }
 
+                    // App Filter Dropdown (as before)
                     Box {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (!isSearchActive) {
@@ -315,6 +337,37 @@ fun NotificationListScreen(viewModel: NotificationViewModel) {
                                         filterDropdownExpanded = false
                                     }
                                 )
+                            }
+                        }
+                    }
+
+                    // Overflow Menu
+                    if (!isSearchActive) { // Only show overflow if search is not active
+                        Box {
+                            IconButton(onClick = { showOverflowMenu = true }) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = stringResource(id = R.string.more_options_description)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(id = R.string.delete_all_notifications_menu_item)) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showDeleteAllDialog = true // Show confirmation dialog
+                                    },
+                                    leadingIcon = { // Optional icon for the menu item
+                                        Icon(
+                                            Icons.Filled.DeleteSweep,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                                // Add more menu items here if needed
                             }
                         }
                     }

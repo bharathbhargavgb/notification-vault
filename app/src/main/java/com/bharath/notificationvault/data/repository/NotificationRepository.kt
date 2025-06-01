@@ -38,4 +38,8 @@ class NotificationRepository(private val notificationDao: NotificationDao) {
         // Delete notifications older than 7 days (from the start of that 7th day)
         notificationDao.deleteOldNotifications(getSevenDaysAgoMillis())
     }
+
+    suspend fun deleteAllNotifications() {
+        notificationDao.deleteAll()
+    }
 }
