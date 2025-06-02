@@ -24,8 +24,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.Checkbox
@@ -33,7 +31,6 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -73,7 +70,6 @@ import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.text.append
 
 class MainActivity : ComponentActivity() {
 
@@ -85,11 +81,13 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val permissionCheckTrigger = mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             NotificationVaultTheme { // Replace with your app's theme
-                MainAppScreen(notificationViewModel)
+                MainAppScreen(notificationViewModel, permissionCheckTrigger.value)
             }
         }
     }
@@ -101,18 +99,23 @@ class MainActivity : ComponentActivity() {
         // This is a simple way to trigger a recomposition if the permission state might have changed.
         // For a more robust solution, you might use a StateFlow in the Activity/ViewModel
         // that observes the permission status.
-        setContent {
-            NotificationVaultTheme {
-                MainAppScreen(notificationViewModel)
-            }
-        }
+        permissionCheckTrigger.value++
+        Log.d("MainActivity", "onResume triggered, permissionCheckTrigger new value: ${permissionCheckTrigger.value}")
     }
 }
 
 @Composable
-fun MainAppScreen(viewModel: NotificationViewModel) {
+fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
     val context = LocalContext.current
-    var hasNotificationAccess by remember { mutableStateOf(isNotificationServiceEnabled(context)) }
+
+    var hasNotificationAccess by remember(permissionCheckKey) {
+        Log.d("MainAppScreenWithTabs", "Re-evaluating notification access with key: $permissionCheckKey")
+        mutableStateOf(isNotificationServiceEnabled(context))
+    }
+
+    LaunchedEffect(hasNotificationAccess) {
+        Log.d("MainAppScreenWithTabs", "Notification access state: $hasNotificationAccess")
+    }
 
     if (!hasNotificationAccess) {
         NotificationAccessScreen {
