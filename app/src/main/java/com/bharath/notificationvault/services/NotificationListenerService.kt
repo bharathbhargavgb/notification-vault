@@ -29,11 +29,8 @@ class NotificationListenerService : NotificationListenerService() {
     private var lastNotificationAppName: String? = null
     private var lastNotificationTitle: String? = null
     private var lastNotificationText: String? = null
-    private var lastNotificationTimestamp: Long = 0L
-
-    // Debounce period in milliseconds to handle rapid-fire identical notifications
-    // (e.g., some apps might post the exact same notification multiple times in quick succession)
-    private val DEBOUNCE_PERIOD_MS = 500 // 0.5 seconds, adjust as needed
+    private var lastNotificationPostTime: Long = 0L
+    private val DEBOUNCE_PERIOD_MS = 500
 
     override fun onCreate() {
         super.onCreate()
@@ -57,37 +54,29 @@ class NotificationListenerService : NotificationListenerService() {
             val title = extras.getString(Notification.EXTRA_TITLE)
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             val postTimeMillis = statusBarNotification.postTime
-            val postTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(postTimeMillis))
+            val notificationKey = statusBarNotification.key
+            val systemNotificationId = statusBarNotification.id
 
-            // Basic check to avoid storing empty or system utility notifications if desired
+
             if (title.isNullOrBlank() && text.isNullOrBlank()) {
-                Log.d(TAG, "Skipping notification with no title or text from $appName")
+                Log.d(TAG, "Skipping notification with no title or text from $appName (Key: $notificationKey)")
                 return
             }
 
-            val isPotentiallyDuplicate = appName == lastNotificationAppName &&
-                                                    title == lastNotificationTitle &&
-                                                    text == lastNotificationText &&
-                                                    postTimeMillis == lastNotificationTimestamp
-
-            // Further debounce check: if the timestamp is the same OR very close (within debounce period)
-            // This helps with apps that might post with slightly different but effectively same timestamps in rapid succession.
-            val isEffectivelySameTime = postTimeMillis == lastNotificationTimestamp ||
-                                        (Math.abs(postTimeMillis - lastNotificationTimestamp) < DEBOUNCE_PERIOD_MS &&
-                                                appName == lastNotificationAppName && // only consider debounce for same app
-                                                title == lastNotificationTitle && text == lastNotificationText)
-
-
-            if (isPotentiallyDuplicate || isEffectivelySameTime) {
-                Log.i("MyNotificationListener", "Duplicate notification ignored: $appName - $title (Timestamp: $postTimeMillis)")
-                return // Ignore this notification
+            // Debounce logic using appName and time
+            if (appName == lastNotificationAppName &&
+                title == lastNotificationTitle &&
+                text == lastNotificationText &&
+                Math.abs(postTimeMillis - lastNotificationPostTime) < DEBOUNCE_PERIOD_MS) {
+                Log.i(TAG, "Duplicate (debounced) notification ignored: $appName - $title (Key: $notificationKey)")
+                return
             }
-
-            // Not a duplicate, update the cache with current notification details
             lastNotificationAppName = appName
             lastNotificationTitle = title
             lastNotificationText = text
-            lastNotificationTimestamp = postTimeMillis
+            lastNotificationPostTime = postTimeMillis
+
+            val postTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(postTimeMillis))
 
             val capturedNotification = CapturedNotification(
                 appName = appName,

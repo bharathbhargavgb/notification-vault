@@ -60,13 +60,12 @@ Notification Vault is an Android application designed to capture and store all i
     *   The UI (`NotificationListScreen`) collects these flows and displays the notifications in a `LazyColumn`.
     *   Users can interact with the list to search, filter, select, and delete notifications.
 
-## Future Enhancements (Optional - ideas you might have)
+## Future Enhancements
 
 *   [ ] Per-app notification blocking/allowing within the app.
 *   [ ] More advanced filtering options (e.g., by date range).
 *   [ ] Export/Import notifications.
 *   [ ] Detailed notification view screen.
-*   [ ] "Missed" or quickly dismissed notifications tab.
 *   [ ] Theming and customization options.
 
 ## Contributing
