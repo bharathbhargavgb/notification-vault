@@ -1,5 +1,6 @@
 package com.bharath.notificationvault
 
+import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -12,12 +13,16 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -39,14 +44,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -59,15 +67,21 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 import com.bharath.notificationvault.data.db.AppDatabase
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import com.bharath.notificationvault.ui.theme.NotificationVaultTheme
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+
+import java.text.SimpleDateFormat
+import java.util.*
+
 
 class MainActivity : ComponentActivity() {
 
@@ -266,6 +280,7 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
     }
 }
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun NotificationListContent(
     notifications: List<CapturedNotification>,
@@ -275,6 +290,9 @@ fun NotificationListContent(
     selectedNotificationIds: List<Long>
 ) {
     val context = LocalContext.current
+    // Create the LazyListState to be shared between the list and the scroller
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     if (notifications.isEmpty()) {
         Box(
@@ -286,32 +304,49 @@ fun NotificationListContent(
             Text(stringResource(id = R.string.no_notifications_message))
         }
     } else {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(notifications, key = { it.id }) { notification ->
-                val isSelected = selectedNotificationIds.contains(notification.id)
-                NotificationItem(
-                    notification = notification,
-                    context = context,
-                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
-                    isSelected = isSelected,
-                    isSelectionModeActive = isSelectionModeActive,
-                    onItemClick = {
-                        if (isSelectionModeActive) {
-                            viewModel.toggleNotificationSelection(notification.id)
+        // BoxWithConstraints is used to overlay the scroller on top of the list.
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = listState // Assign the state to the LazyColumn
+            ) {
+                items(notifications, key = { it.id }) { notification ->
+                    val isSelected = selectedNotificationIds.contains(notification.id)
+                    NotificationItem(
+                        notification = notification,
+                        context = context,
+                        searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
+                        isSelected = isSelected,
+                        isSelectionModeActive = isSelectionModeActive,
+                        onItemClick = {
+                            if (isSelectionModeActive) {
+                                viewModel.toggleNotificationSelection(notification.id)
+                            }
+                        },
+                        onItemLongClick = {
+                            viewModel.activateSelectionMode(notification.id)
                         }
-                    },
-                    onItemLongClick = {
-                        viewModel.activateSelectionMode(notification.id)
-                    }
-                )
-                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    )
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
+
+            // The custom FastScroller composable
+            FastScroller(
+                listState = listState,
+                notifications = notifications,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .fillMaxHeight()
+            ) { targetIndex ->
+                // This is the callback that scrolls the list
+                coroutineScope.launch {
+                    listState.scrollToItem(targetIndex)
+                }
             }
         }
     }
 }
-
-// DefaultTopAppBar, SelectionModeTopAppBar, NotificationItem, etc. remain the same.
-// ... (paste the rest of your MainActivity.kt functions here)
 
 
 fun isNotificationServiceEnabled(context: Context): Boolean {
@@ -682,6 +717,130 @@ fun NotificationItem(
     }
 }
 
+/**
+ * A custom fast scroller composable with a date indicator bubble.
+ *
+ * @param listState The state of the LazyColumn to control.
+ * @param notifications The full list of notifications to get date information.
+ * @param modifier The modifier for this composable.
+ * @param onScroll A lambda invoked when the scroller is dragged to a new position.
+ */
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+fun FastScroller(
+    listState: LazyListState,
+    notifications: List<CapturedNotification>,
+    modifier: Modifier = Modifier,
+    onScroll: (targetIndex: Int) -> Unit
+) {
+    val isVisible = listState.canScrollForward || listState.canScrollBackward
+    if (!isVisible || listState.layoutInfo.totalItemsCount == 0) return
+
+    // We need the height of the container, so BoxWithConstraints is useful here.
+    BoxWithConstraints(modifier = modifier) {
+        var isDragging by remember { mutableStateOf(false) }
+        var dragOffset by remember { mutableStateOf(0f) }
+        val density = LocalDensity.current
+        val firstVisibleItem by remember { derivedStateOf { listState.firstVisibleItemIndex } }
+
+        val maxHeightPx = with(density) { maxHeight.toPx() }
+        val thumbHeightDp = 64.dp
+        val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
+        val scrollableHeightPx = maxHeightPx - thumbHeightPx
+
+        fun getThumbOffsetY(): Float {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            if (totalItems == 0) return 0f
+            val scrollProportion = firstVisibleItem.toFloat() / (totalItems - 1).coerceAtLeast(1)
+            return (scrollableHeightPx * scrollProportion).coerceIn(0f, scrollableHeightPx)
+        }
+
+        val thumbOffsetY by remember { derivedStateOf { getThumbOffsetY() } }
+
+        // Date Indicator Bubble is now a child of the wider BoxWithConstraints
+        if (isDragging && firstVisibleItem < notifications.size) {
+            val dateString = formatDateForIndicator(notifications[firstVisibleItem].postTimeString)
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(
+                        x = (-56).dp, // Offset it to the left of the thumb area
+                        y = with(density) { thumbOffsetY.toDp() }
+                    ),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.secondary,
+                contentColor = MaterialTheme.colorScheme.onSecondary,
+                tonalElevation = 8.dp
+            ) {
+                Text(
+                    text = dateString,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    fontSize = 14.sp,
+                    maxLines = 1
+                )
+            }
+        }
+
+        // Draggable Thumb area is in its own container with a fixed width
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .width(48.dp) // The touchable area for the scroller
+                .fillMaxHeight()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            isDragging = true
+                            dragOffset = getThumbOffsetY()
+                        },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false }
+                    ) { change, dragAmount ->
+                        val newOffset = (dragOffset + dragAmount).coerceIn(0f, scrollableHeightPx)
+                        val targetProportion = newOffset / scrollableHeightPx
+                        val totalItems = listState.layoutInfo.totalItemsCount
+                        val targetIndex = ((totalItems - 1) * targetProportion)
+                            .toInt()
+                            .coerceIn(0, totalItems - 1)
+
+                        if (targetIndex >= 0) {
+                            onScroll(targetIndex)
+                        }
+                        dragOffset = newOffset
+                        change.consume()
+                    }
+                }
+        ) {
+            // The visual representation of the thumb
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 8.dp)
+                    .offset(y = with(density) { thumbOffsetY.toDp() })
+                    .size(width = 12.dp, height = thumbHeightDp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = if (isDragging) 0.7f else 0.4f),
+                        shape = CircleShape
+                    )
+            )
+        }
+    }
+}
+
+/**
+ * A helper function to format the date string for the indicator bubble.
+ * e.g., "2023-06-06 10:28:39" -> "Jun 06"
+ */
+private fun formatDateForIndicator(postTimeString: String): String {
+    return try {
+        val inputFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        val outputFormat = SimpleDateFormat("MMM d", Locale.getDefault())
+        val date = inputFormat.parse(postTimeString)
+        date?.let { outputFormat.format(it) } ?: ""
+    } catch (e: Exception) {
+        "" // Return empty string on parsing failure
+    }
+}
 
 // --- Previews ---
 @Preview(showBackground = true)
