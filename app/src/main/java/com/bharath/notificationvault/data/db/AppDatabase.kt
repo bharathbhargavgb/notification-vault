@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.db.dao.NotificationDao
 
-@Database(entities = [CapturedNotification::class], version = 1, exportSchema = false)
+@Database(entities = [CapturedNotification::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun notificationDao(): NotificationDao
 
@@ -20,8 +20,10 @@ abstract class AppDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "notification_logger_database" // Changed name for clarity
-                ).build()
+                    "notification_logger_database"
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

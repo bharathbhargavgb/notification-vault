@@ -15,6 +15,9 @@ interface NotificationDao {
     @Query("SELECT * FROM notifications WHERE postTimeMillis >= :sevenDaysAgoMillis ORDER BY postTimeMillis DESC")
     fun getNotificationsLast7Days(sevenDaysAgoMillis: Long): LiveData<List<CapturedNotification>>
 
+    @Query("SELECT * FROM notifications WHERE isDismissed = 1 AND postTimeMillis >= :sevenDaysAgoMillis ORDER BY postTimeMillis DESC")
+    fun getDismissedNotificationsLast7Days(sevenDaysAgoMillis: Long): LiveData<List<CapturedNotification>>
+
     @Query("SELECT * FROM notifications WHERE packageName = :packageName AND postTimeMillis >= :sevenDaysAgoMillis ORDER BY postTimeMillis DESC")
     fun getNotificationsByAppLast7Days(packageName: String, sevenDaysAgoMillis: Long): LiveData<List<CapturedNotification>>
 
@@ -34,4 +37,7 @@ interface NotificationDao {
 
     @Query("DELETE FROM notifications") // Make sure table name matches your entity
     suspend fun deleteAll()
+
+    @Query("UPDATE notifications SET isDismissed = 1 WHERE key = :key")
+    suspend fun markAsDismissed(key: String)
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.map
 import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
@@ -24,16 +25,20 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
 
     private val _selectedAppNameFilter = MutableLiveData<String?>(null) // Filter by app name (display value)
     private val _searchQuery = MutableLiveData<String?>(null) // For search text
+    private val _selectedTab = MutableLiveData<Int>(0) // 0 for All, 1 for Dismissed
 
     // Helper LiveData to trigger the query based on package name
     private val _packageNameForQuery = MutableLiveData<String?>(null)
 
-    // LiveData that fetches from the repository based on the app filter
-    private val notificationsFromRepository: LiveData<List<CapturedNotification>> = _packageNameForQuery.switchMap { pkgName ->
-        if (pkgName == null) {
-            repository.allNotificationsLast7Days
-        } else {
-            repository.getNotificationsByAppLast7Days(pkgName)
+    // LiveData that fetches from the repository based on the app filter and tab
+    private val notificationsFromRepository: LiveData<List<CapturedNotification>> = _selectedTab.switchMap { tab ->
+        _packageNameForQuery.switchMap { pkgName ->
+            val source = when (tab) {
+                0 -> if (pkgName == null) repository.allNotificationsLast7Days else repository.getNotificationsByAppLast7Days(pkgName)
+                1 -> if (pkgName == null) repository.dismissedNotificationsLast7Days else repository.getNotificationsByAppLast7Days(pkgName).map { list -> list.filter { it.isDismissed } }
+                else -> repository.allNotificationsLast7Days
+            }
+            source
         }
     }
 
@@ -83,6 +88,10 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
 
     fun setSearchQuery(query: String?) {
         _searchQuery.value = query
+    }
+
+    fun setSelectedTab(index: Int) {
+        _selectedTab.value = index
     }
 
     fun cleanupOldNotifications() {

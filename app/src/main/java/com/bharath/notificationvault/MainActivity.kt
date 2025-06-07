@@ -21,8 +21,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SelectAll
@@ -37,10 +37,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
@@ -69,6 +66,7 @@ import com.bharath.notificationvault.ui.theme.NotificationVaultTheme
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -86,19 +84,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            NotificationVaultTheme { // Replace with your app's theme
+            NotificationVaultTheme {
                 MainAppScreen(notificationViewModel, permissionCheckTrigger.value)
             }
         }
     }
 
-    // Call this when the activity resumes to check if permission was granted
-    // and refresh the UI accordingly.
     override fun onResume() {
         super.onResume()
-        // This is a simple way to trigger a recomposition if the permission state might have changed.
-        // For a more robust solution, you might use a StateFlow in the Activity/ViewModel
-        // that observes the permission status.
         permissionCheckTrigger.value++
         Log.d("MainActivity", "onResume triggered, permissionCheckTrigger new value: ${permissionCheckTrigger.value}")
     }
@@ -108,25 +101,217 @@ class MainActivity : ComponentActivity() {
 fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
     val context = LocalContext.current
 
-    var hasNotificationAccess by remember(permissionCheckKey) {
-        Log.d("MainAppScreenWithTabs", "Re-evaluating notification access with key: $permissionCheckKey")
+    val hasNotificationAccess by remember(permissionCheckKey) {
         mutableStateOf(isNotificationServiceEnabled(context))
-    }
-
-    LaunchedEffect(hasNotificationAccess) {
-        Log.d("MainAppScreenWithTabs", "Notification access state: $hasNotificationAccess")
     }
 
     if (!hasNotificationAccess) {
         NotificationAccessScreen {
             requestNotificationAccess(context)
-            // After attempting to request, we don't immediately know if it was granted.
-            // The onResume in MainActivity will handle refreshing the state.
         }
     } else {
-        NotificationListScreen(viewModel)
+        // This is now the main screen with the correct layout
+        NotificationScreenWithTabs(viewModel)
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
+@Composable
+fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
+    val notifications by viewModel.notifications.observeAsState(emptyList())
+    val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
+    var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
+    var filterDropdownExpanded by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    val isSelectionModeActive by viewModel.isSelectionModeActive.collectAsState()
+    val selectedNotificationIds = viewModel.selectedNotificationIds
+
+    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
+    val tabTitles = listOf("All", "Dismissed")
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState { tabTitles.size }
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        viewModel.cleanupOldNotifications()
+    }
+
+    LaunchedEffect(searchQuery) {
+        viewModel.setSearchQuery(searchQuery.ifBlank { null })
+    }
+
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            try {
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (e: Exception) {
+                println("Focus request failed: ${e.message}")
+            }
+        } else {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
+    }
+
+    // Sync pager state with tab index
+    LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
+        if (!pagerState.isScrollInProgress) {
+            selectedTabIndex = pagerState.currentPage
+            viewModel.setSelectedTab(pagerState.currentPage)
+        }
+    }
+
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_all_title)) },
+            text = { Text(stringResource(id = R.string.confirm_delete_all_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteAllNotifications()
+                    showDeleteAllDialog = false
+                }) { Text(stringResource(id = R.string.delete_all_button_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
+            }
+        )
+    }
+
+    if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_selected_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_selected_message, selectedNotificationIds.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSelectedNotifications()
+                    showDeleteSelectedDialog = false
+                }) { Text(stringResource(id = R.string.delete_button_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            if (isSelectionModeActive) {
+                SelectionModeTopAppBar(
+                    selectedItemCount = selectedNotificationIds.size,
+                    onCloseSelectionMode = { viewModel.toggleSelectionMode() },
+                    onDeleteSelected = { showDeleteSelectedDialog = true },
+                    onSelectAll = {
+                        val allVisibleIds = notifications.map { it.id }
+                        viewModel.selectAllVisible(allVisibleIds)
+                    }
+                )
+            } else {
+                DefaultTopAppBar(
+                    viewModel = viewModel,
+                    isSearchActive = isSearchActive,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    onSearchActiveChange = { isSearchActive = it },
+                    appNamesForFilter = appNamesForFilter,
+                    selectedAppNameForFilter = selectedAppNameForFilter,
+                    onSelectedAppNameForFilterChange = { selectedAppNameForFilter = it },
+                    filterDropdownExpanded = filterDropdownExpanded,
+                    onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
+                    onShowDeleteAllDialog = { showDeleteAllDialog = true }
+                )
+            }
+        }
+    ) { paddingValues ->
+        Column(modifier = Modifier.padding(paddingValues)) {
+            TabRow(selectedTabIndex = selectedTabIndex) {
+                tabTitles.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = {
+                            selectedTabIndex = index
+                            viewModel.setSelectedTab(index)
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
+                            }
+                        },
+                        text = { Text(text = title) }
+                    )
+                }
+            }
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                NotificationListContent(
+                    notifications = notifications,
+                    viewModel = viewModel,
+                    searchQuery = searchQuery,
+                    isSelectionModeActive = isSelectionModeActive,
+                    selectedNotificationIds = selectedNotificationIds
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun NotificationListContent(
+    notifications: List<CapturedNotification>,
+    viewModel: NotificationViewModel,
+    searchQuery: String?,
+    isSelectionModeActive: Boolean,
+    selectedNotificationIds: List<Long>
+) {
+    val context = LocalContext.current
+
+    if (notifications.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(stringResource(id = R.string.no_notifications_message))
+        }
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(notifications, key = { it.id }) { notification ->
+                val isSelected = selectedNotificationIds.contains(notification.id)
+                NotificationItem(
+                    notification = notification,
+                    context = context,
+                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
+                    isSelected = isSelected,
+                    isSelectionModeActive = isSelectionModeActive,
+                    onItemClick = {
+                        if (isSelectionModeActive) {
+                            viewModel.toggleNotificationSelection(notification.id)
+                        }
+                    },
+                    onItemLongClick = {
+                        viewModel.activateSelectionMode(notification.id)
+                    }
+                )
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
+
+// DefaultTopAppBar, SelectionModeTopAppBar, NotificationItem, etc. remain the same.
+// ... (paste the rest of your MainActivity.kt functions here)
 
 
 fun isNotificationServiceEnabled(context: Context): Boolean {
@@ -150,9 +335,6 @@ fun isNotificationServiceEnabled(context: Context): Boolean {
 fun requestNotificationAccess(context: Context) {
     Log.d("MainActivity", "Requesting notification access.")
     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-    // Add a flag to indicate that this intent is being launched from your app,
-    // which can be useful if the settings app wants to highlight your listener.
-    // intent.putExtra(":settings:fragment_args_key", context.packageName) // This key might vary by OEM/Android version
     context.startActivity(intent)
 }
 
@@ -191,177 +373,6 @@ fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
-@Composable
-fun NotificationListScreen(viewModel: NotificationViewModel) {
-    val notifications by viewModel.notifications.observeAsState(emptyList())
-    val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
-    var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
-    var filterDropdownExpanded by remember { mutableStateOf(false) }
-
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
-
-    val isSelectionModeActive by viewModel.isSelectionModeActive.collectAsState()
-    val selectedNotificationIds = viewModel.selectedNotificationIds // Observe the SnapshotStateList
-
-    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
-
-    // State for the overflow menu
-    var showOverflowMenu by remember { mutableStateOf(false) }
-    // State for the confirmation dialog
-    var showDeleteAllDialog by remember { mutableStateOf(false) }
-
-
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
-
-    val context = LocalContext.current
-
-    LaunchedEffect(Unit) {
-        viewModel.cleanupOldNotifications()
-    }
-
-    LaunchedEffect(searchQuery) {
-        viewModel.setSearchQuery(searchQuery.ifBlank { null })
-    }
-
-    LaunchedEffect(isSearchActive) {
-        if (isSearchActive) {
-            try {
-                focusRequester.requestFocus()
-                keyboardController?.show()
-            } catch (e: Exception) {
-                println("Focus request failed: ${e.message}")
-            }
-        } else {
-            keyboardController?.hide()
-            focusManager.clearFocus()
-        }
-    }
-
-    // Confirmation Dialog for Deleting All Notifications
-    if (showDeleteAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteAllDialog = false },
-            title = { Text(stringResource(id = R.string.confirm_delete_all_title)) },
-            text = { Text(stringResource(id = R.string.confirm_delete_all_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deleteAllNotifications()
-                        showDeleteAllDialog = false
-                    }
-                ) {
-                    Text(stringResource(id = R.string.delete_all_button_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteAllDialog = false }) {
-                    Text(stringResource(id = R.string.cancel_button))
-                }
-            }
-        )
-    }
-
-    if (showDeleteSelectedDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteSelectedDialog = false },
-            title = { Text(stringResource(id = R.string.confirm_delete_selected_title)) },
-            text = { Text(stringResource(R.string.confirm_delete_selected_message, selectedNotificationIds.size)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deleteSelectedNotifications()
-                        showDeleteSelectedDialog = false
-                    }
-                ) {
-                    Text(stringResource(id = R.string.delete_button_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteSelectedDialog = false }) {
-                    Text(stringResource(id = R.string.cancel_button))
-                }
-            }
-        )
-    }
-
-    Scaffold(
-        topBar = {
-            if (isSelectionModeActive) {
-                SelectionModeTopAppBar(
-                    selectedItemCount = selectedNotificationIds.size,
-                    onCloseSelectionMode = { viewModel.toggleSelectionMode() },
-                    onDeleteSelected = { showDeleteSelectedDialog = true },
-                    onSelectAll = {
-                        val allVisibleIds = notifications.map { it.id } // Get IDs of currently visible/filtered notifications
-                        viewModel.selectAllVisible(allVisibleIds)
-                    }
-                )
-            } else {
-                // Regular TopAppBar (as you had before with search, filter, overflow menu)
-                DefaultTopAppBar(
-                    viewModel = viewModel,
-                    isSearchActive = isSearchActive,
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { searchQuery = it },
-                    onSearchActiveChange = { isSearchActive = it },
-                    appNamesForFilter = appNamesForFilter,
-                    selectedAppNameForFilter = selectedAppNameForFilter,
-                    onSelectedAppNameForFilterChange = { selectedAppNameForFilter = it },
-                    filterDropdownExpanded = filterDropdownExpanded,
-                    onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
-                    onShowDeleteAllDialog = { showDeleteAllDialog = true }
-                )
-            }
-        }
-    ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues)) {
-            if (notifications.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (searchQuery.isNotBlank() || selectedAppNameForFilter != null) {
-                            stringResource(id = R.string.no_notifications_match_filters)
-                        } else {
-                            stringResource(id = R.string.no_notifications_message)
-                        }
-                    )
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(notifications, key = { it.id }) { notification ->
-                        val isSelected = selectedNotificationIds.contains(notification.id)
-                        NotificationItem(
-                            notification = notification,
-                            context = context,
-                            searchQuery = if (searchQuery.isNotBlank()) searchQuery else null,
-                            isSelected = isSelected,
-                            isSelectionModeActive = isSelectionModeActive,
-                            onItemClick = {
-                                if (isSelectionModeActive) {
-                                    viewModel.toggleNotificationSelection(notification.id)
-                                } else {
-                                    // Handle regular click if needed (e.g., open details)
-                                }
-                            },
-                            onItemLongClick = {
-                                viewModel.activateSelectionMode(notification.id)
-                            }
-                        )
-                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                    }
-                }
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -377,9 +388,8 @@ fun DefaultTopAppBar(
     filterDropdownExpanded: Boolean,
     onFilterDropdownExpandedChange: (Boolean) -> Unit,
     onShowDeleteAllDialog: () -> Unit
-    // Removed unused state from the argument list
 ) {
-    var showOverflowMenu by remember { mutableStateOf(false) } // Keep overflow menu state local to this app bar
+    var showOverflowMenu by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -390,7 +400,6 @@ fun DefaultTopAppBar(
             }
         },
         actions = {
-            // Search Field or Icon logic
             if (isSearchActive) {
                 OutlinedTextField(
                     value = searchQuery,
@@ -422,7 +431,7 @@ fun DefaultTopAppBar(
                             )
                         }
                     },
-                    colors = TextFieldDefaults.colors(/*...your colors...*/)
+                    colors = TextFieldDefaults.colors()
                 )
             }
 
@@ -435,7 +444,6 @@ fun DefaultTopAppBar(
                 }
             }
 
-            // App Filter Dropdown
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (!isSearchActive) {
@@ -479,7 +487,6 @@ fun DefaultTopAppBar(
                 }
             }
 
-            // Overflow Menu
             if (!isSearchActive) {
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {
@@ -496,7 +503,7 @@ fun DefaultTopAppBar(
                             text = { Text(stringResource(id = R.string.delete_all_notifications_menu_item)) },
                             onClick = {
                                 showOverflowMenu = false
-                                onShowDeleteAllDialog() // Show confirmation dialog
+                                onShowDeleteAllDialog()
                             },
                             leadingIcon = {
                                 Icon(Icons.Filled.DeleteSweep, contentDescription = null)
@@ -539,7 +546,7 @@ fun SelectionModeTopAppBar(
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer, // Or a distinct color for selection mode
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
             titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -547,7 +554,7 @@ fun SelectionModeTopAppBar(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class) // For combinedClickable
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NotificationItem(
     notification: CapturedNotification,
@@ -561,17 +568,16 @@ fun NotificationItem(
     var appIcon by remember { mutableStateOf<Drawable?>(null) }
 
     LaunchedEffect(notification.packageName) {
-        withContext(Dispatchers.IO) { // Perform icon loading off the main thread
+        withContext(Dispatchers.IO) {
             try {
                 appIcon = context.packageManager.getApplicationIcon(notification.packageName)
             } catch (e: PackageManager.NameNotFoundException) {
                 Log.e("NotificationItem", "Icon not found for ${notification.packageName}", e)
-                appIcon = null // Set to null if not found
+                appIcon = null
             }
         }
     }
 
-    // Helper function for highlighting
     fun highlightText(text: String?, query: String?): AnnotatedString {
         if (text.isNullOrBlank()) return AnnotatedString("")
         if (query.isNullOrBlank()) return AnnotatedString(text)
@@ -587,9 +593,9 @@ fun NotificationItem(
                     append(text.substring(startIndex))
                     break
                 }
-                append(text.substring(startIndex, foundIndex)) // Text before match
+                append(text.substring(startIndex, foundIndex))
                 withStyle(style = SpanStyle(fontWeight = FontWeight.Bold, background = Color.Yellow.copy(alpha = 0.5f))) {
-                    append(text.substring(foundIndex, foundIndex + query.length)) // Matched text
+                    append(text.substring(foundIndex, foundIndex + query.length))
                 }
                 startIndex = foundIndex + query.length
             }
@@ -600,23 +606,22 @@ fun NotificationItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable( // Use combinedClickable for long press and regular click
+            .combinedClickable(
                 onClick = onItemClick,
                 onLongClick = onItemLongClick
             )
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent) // Visual feedback for selection
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
             .padding(vertical = 8.dp, horizontal = 16.dp),
         verticalAlignment = Alignment.Top
     ) {
         if (isSelectionModeActive) {
             Checkbox(
                 checked = isSelected,
-                onCheckedChange = { onItemClick() }, // Toggle selection on checkbox click as well
+                onCheckedChange = { onItemClick() },
                 modifier = Modifier.padding(end = 12.dp).align(Alignment.CenterVertically),
                 colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
             )
         } else {
-            // Your existing icon Box
             Box(modifier = Modifier.size(40.dp).padding(end = 8.dp), contentAlignment = Alignment.Center) {
                 appIcon?.let {
                     Image(
@@ -641,12 +646,12 @@ fun NotificationItem(
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    text = notification.postTimeString.substringAfter(" "), // Show only time or customize
+                    text = notification.postTimeString.substringAfter(" "),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(2.dp)) // Reduced space
+            Spacer(modifier = Modifier.height(2.dp))
 
             notification.title?.takeIf { it.isNotBlank() }?.let {
                 Text(
@@ -667,7 +672,7 @@ fun NotificationItem(
             }
             if (notification.title.isNullOrBlank() && notification.textContent.isNullOrBlank()){
                 Text(
-                    text = "(No content)", // Placeholder if both title and text are empty
+                    text = "(No content)",
                     fontSize = 14.sp,
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)

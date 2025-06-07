@@ -84,7 +84,8 @@ class NotificationListenerService : NotificationListenerService() {
                 title = title,
                 textContent = text,
                 postTimeMillis = postTimeMillis,
-                postTimeString = postTimeString
+                postTimeString = postTimeString,
+                key = notificationKey
             )
 
             serviceScope.launch {
@@ -100,10 +101,15 @@ class NotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
-        // You could optionally log removed notifications or update their status
-        // For this app's purpose (listing received notifications), we might not need to do much here.
         sbn?.let {
-            Log.d(TAG, "Notification Removed: ${it.packageName} - ${it.notification.extras.getString(Notification.EXTRA_TITLE)}")
+            serviceScope.launch {
+                try {
+                    notificationDao.markAsDismissed(it.key)
+                    Log.d(TAG, "Notification marked as dismissed: ${it.packageName} - ${it.notification.extras.getString(Notification.EXTRA_TITLE)}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error marking notification as dismissed", e)
+                }
+            }
         }
     }
 

@@ -20,6 +20,9 @@ class NotificationRepository(private val notificationDao: NotificationDao) {
     val allNotificationsLast7Days: LiveData<List<CapturedNotification>> =
         notificationDao.getNotificationsLast7Days(getSevenDaysAgoMillis())
 
+    val dismissedNotificationsLast7Days: LiveData<List<CapturedNotification>> =
+        notificationDao.getDismissedNotificationsLast7Days(getSevenDaysAgoMillis())
+
     fun getNotificationsByAppLast7Days(packageName: String): LiveData<List<CapturedNotification>> {
         return notificationDao.getNotificationsByAppLast7Days(packageName, getSevenDaysAgoMillis())
     }
@@ -47,5 +50,9 @@ class NotificationRepository(private val notificationDao: NotificationDao) {
 
     suspend fun deleteAllNotifications() {
         notificationDao.deleteAll()
+    }
+
+    suspend fun markAsDismissed(key: String) {
+        notificationDao.markAsDismissed(key)
     }
 }

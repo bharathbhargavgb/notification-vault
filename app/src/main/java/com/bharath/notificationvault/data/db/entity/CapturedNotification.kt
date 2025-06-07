@@ -11,5 +11,7 @@ data class CapturedNotification(
     val title: String?,
     val textContent: String?,
     val postTimeMillis: Long,
-    val postTimeString: String // Formatted string for display
+    val postTimeString: String, // Formatted string for display
+    var isDismissed: Boolean = false, // To track dismissed notifications
+    val key: String? = null // Unique key for the notification
 )
