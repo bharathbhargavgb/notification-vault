@@ -21,10 +21,16 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-// Sealed class to represent the different types of items in our list
+// Enum to represent the time periods for sub-grouping
+private enum class TimeOfDay {
+    UNGODLY, MORNING, AFTERNOON, EVENING, NIGHT
+}
+
+// Updated sealed class to include a sub-header type
 sealed class NotificationListItem {
     data class NotificationItem(val notification: CapturedNotification) : NotificationListItem()
     data class HeaderItem(val date: String) : NotificationListItem()
+    data class SubHeaderItem(val timeOfDay: String, val id: String) : NotificationListItem()
 }
 
 
@@ -84,6 +90,21 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
                     (notification.textContent?.lowercase(Locale.getDefault())?.contains(lowerCaseQuery) == true)
         }
     }
+
+    /**
+     * Helper function to determine the time of day based on the user's specified ranges.
+     */
+    private fun getTimeOfDay(calendar: Calendar): TimeOfDay {
+        return when (calendar.get(Calendar.HOUR_OF_DAY)) {
+            in 0..5 -> TimeOfDay.UNGODLY      // 12:00 AM - 5:59 AM
+            in 6..11 -> TimeOfDay.MORNING     // 6:00 AM - 11:59 AM
+            in 12..15 -> TimeOfDay.AFTERNOON  // 12:00 PM - 3:59 PM
+            in 16..20 -> TimeOfDay.EVENING    // 4:00 PM - 8:59 PM
+            else -> TimeOfDay.NIGHT           // 9:00 PM - 11:59 PM
+        }
+    }
+
+
     private fun groupNotificationsByDate(notifications: List<CapturedNotification>?): List<NotificationListItem> {
         if (notifications.isNullOrEmpty()) {
             return emptyList()
@@ -96,12 +117,15 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
 
         var lastHeaderDay = -1
         var lastHeaderYear = -1
+        var lastTimeOfDay: TimeOfDay? = null
 
         notifications.forEach { notification ->
             val currentCal = Calendar.getInstance().apply { timeInMillis = notification.postTimeMillis }
             val currentDay = currentCal.get(Calendar.DAY_OF_YEAR)
             val currentYear = currentCal.get(Calendar.YEAR)
+            val currentTimeOfDay = getTimeOfDay(currentCal)
 
+            // Check if a new Date header is needed
             if (currentDay != lastHeaderDay || currentYear != lastHeaderYear) {
                 val headerText = when {
                     currentDay == today.get(Calendar.DAY_OF_YEAR) && currentYear == today.get(Calendar.YEAR) -> "Today"
@@ -111,7 +135,24 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
                 items.add(NotificationListItem.HeaderItem(headerText))
                 lastHeaderDay = currentDay
                 lastHeaderYear = currentYear
+                lastTimeOfDay = null // Reset time of day for the new date
             }
+
+            // Check if a new Time of Day sub-header is needed
+            if (currentTimeOfDay != lastTimeOfDay) {
+                val subHeaderText = when (currentTimeOfDay) {
+                    TimeOfDay.UNGODLY -> "Ungodly Hours"
+                    TimeOfDay.MORNING -> "Morning"
+                    TimeOfDay.AFTERNOON -> "Afternoon"
+                    TimeOfDay.EVENING -> "Evening"
+                    TimeOfDay.NIGHT -> "Night"
+                }
+                // Create a stable ID for the sub-header item
+                val subHeaderId = "$currentYear-$currentDay-${currentTimeOfDay.name}"
+                items.add(NotificationListItem.SubHeaderItem(subHeaderText, subHeaderId))
+                lastTimeOfDay = currentTimeOfDay
+            }
+
             items.add(NotificationListItem.NotificationItem(notification))
         }
         return items
@@ -125,7 +166,6 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
             _packageNameForQuery.value = null
         } else {
             viewModelScope.launch {
-                // Fetch the package name associated with the selected app name for the query
                 _packageNameForQuery.value = repository.getPackageNameByAppName(appName)
             }
         }
@@ -146,7 +186,7 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     }
 
     fun deleteAllNotifications() {
-        viewModelScope.launch(Dispatchers.IO) { // Perform database operations on a background thread
+        viewModelScope.launch(Dispatchers.IO) {
             repository.deleteAllNotifications()
         }
     }
@@ -154,7 +194,7 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     fun toggleSelectionMode() {
         _isSelectionModeActive.update { !it }
         if (!_isSelectionModeActive.value) {
-            clearSelection() // Clear selection when exiting selection mode
+            clearSelection()
         }
     }
 
@@ -178,7 +218,6 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     }
 
     fun selectAllVisible(visibleNotificationIds: List<Long>) {
-        // Clear current selection and add all visible ones
         _selectedNotificationIds.clear()
         _selectedNotificationIds.addAll(visibleNotificationIds.filterNot { _selectedNotificationIds.contains(it) })
         if (_selectedNotificationIds.isNotEmpty() && !_isSelectionModeActive.value) {
@@ -190,14 +229,13 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     fun deleteSelectedNotifications() {
         if (_selectedNotificationIds.isNotEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
-                repository.deleteNotificationsByIds(_selectedNotificationIds.toList()) // Pass a copy
+                repository.deleteNotificationsByIds(_selectedNotificationIds.toList())
                 _selectedNotificationIds.clear()
-                _isSelectionModeActive.value = false // Exit selection mode after deletion
+                _isSelectionModeActive.value = false
             }
         }
     }
 
-    // Initialize with no filter and trigger initial load
     init {
         setAppFilter(null)
         setSearchQuery(null)

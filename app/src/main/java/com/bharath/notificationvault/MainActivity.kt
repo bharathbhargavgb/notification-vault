@@ -122,7 +122,6 @@ fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
             requestNotificationAccess(context)
         }
     } else {
-        // This is now the main screen with the correct layout
         NotificationScreenWithTabs(viewModel)
     }
 }
@@ -177,7 +176,6 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
         }
     }
 
-    // Sync pager state with tab index
     LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
         if (!pagerState.isScrollInProgress) {
             selectedTabIndex = pagerState.currentPage
@@ -270,7 +268,7 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
             ) {
                 NotificationListContent(
                     groupedItems = groupedItems,
-                    notifications = notifications, // Pass flat list for FastScroller
+                    notifications = notifications,
                     viewModel = viewModel,
                     searchQuery = searchQuery,
                     isSelectionModeActive = isSelectionModeActive,
@@ -286,7 +284,7 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
 @Composable
 fun NotificationListContent(
     groupedItems: List<NotificationListItem>,
-    notifications: List<CapturedNotification>, // This is the original flat list for the scroller
+    notifications: List<CapturedNotification>,
     viewModel: NotificationViewModel,
     searchQuery: String?,
     isSelectionModeActive: Boolean,
@@ -318,6 +316,11 @@ fun NotificationListContent(
                                 DateHeader(text = listItem.date)
                             }
                         }
+                        is NotificationListItem.SubHeaderItem -> {
+                            item(key = listItem.id) {
+                                TimeOfDayHeader(text = listItem.timeOfDay)
+                            }
+                        }
                         is NotificationListItem.NotificationItem -> {
                             val notification = listItem.notification
                             item(key = notification.id) {
@@ -344,17 +347,14 @@ fun NotificationListContent(
                 }
             }
 
-            // The custom FastScroller composable
             FastScroller(
                 listState = listState,
-                notifications = notifications, // Use the flat list for date calculations
+                notifications = notifications,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .fillMaxHeight()
             ) { targetIndex ->
                 coroutineScope.launch {
-                    // This might need adjustment if the scroller and list get out of sync
-                    // For now, we assume the flat list index corresponds reasonably well.
                     listState.scrollToItem(targetIndex)
                 }
             }
@@ -425,7 +425,7 @@ fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
 @Composable
 fun DateHeader(text: String) {
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
@@ -437,6 +437,19 @@ fun DateHeader(text: String) {
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         )
     }
+}
+
+@Composable
+fun TimeOfDayHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)
+    )
 }
 
 
@@ -752,14 +765,6 @@ fun NotificationItem(
     }
 }
 
-/**
- * A custom fast scroller composable with a date indicator bubble.
- *
- * @param listState The state of the LazyColumn to control.
- * @param notifications The full list of notifications to get date information.
- * @param modifier The modifier for this composable.
- * @param onScroll A lambda invoked when the scroller is dragged to a new position.
- */
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun FastScroller(
@@ -771,7 +776,6 @@ fun FastScroller(
     val isVisible = listState.canScrollForward || listState.canScrollBackward
     if (!isVisible || listState.layoutInfo.totalItemsCount == 0) return
 
-    // We need the height of the container, so BoxWithConstraints is useful here.
     BoxWithConstraints(modifier = modifier) {
         var isDragging by remember { mutableStateOf(false) }
         var dragOffset by remember { mutableStateOf(0f) }
@@ -792,14 +796,13 @@ fun FastScroller(
 
         val thumbOffsetY by remember { derivedStateOf { getThumbOffsetY() } }
 
-        // Date Indicator Bubble is now a child of the wider BoxWithConstraints
         if (isDragging && firstVisibleItem < notifications.size) {
             val dateString = formatDateForIndicator(notifications[firstVisibleItem].postTimeString)
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .offset(
-                        x = (-56).dp, // Offset it to the left of the thumb area
+                        x = (-56).dp,
                         y = with(density) { thumbOffsetY.toDp() }
                     ),
                 shape = MaterialTheme.shapes.medium,
@@ -816,11 +819,10 @@ fun FastScroller(
             }
         }
 
-        // Draggable Thumb area is in its own container with a fixed width
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .width(48.dp) // The touchable area for the scroller
+                .width(48.dp)
                 .fillMaxHeight()
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
@@ -846,7 +848,6 @@ fun FastScroller(
                     }
                 }
         ) {
-            // The visual representation of the thumb
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -862,10 +863,6 @@ fun FastScroller(
     }
 }
 
-/**
- * A helper function to format the date string for the indicator bubble.
- * e.g., "2023-06-06 10:28:39" -> "Jun 06"
- */
 private fun formatDateForIndicator(postTimeString: String): String {
     return try {
         val inputFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
@@ -873,7 +870,7 @@ private fun formatDateForIndicator(postTimeString: String): String {
         val date = inputFormat.parse(postTimeString)
         date?.let { outputFormat.format(it) } ?: ""
     } catch (e: Exception) {
-        "" // Return empty string on parsing failure
+        ""
     }
 }
 
