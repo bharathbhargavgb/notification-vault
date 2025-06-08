@@ -1,5 +1,6 @@
 package com.bharath.notificationvault.ui.viewmodel
 
+import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
@@ -11,15 +12,21 @@ import androidx.lifecycle.viewModelScope
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import java.util.Locale
-
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.toMutableStateList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+
+// Sealed class to represent the different types of items in our list
+sealed class NotificationListItem {
+    data class NotificationItem(val notification: CapturedNotification) : NotificationListItem()
+    data class HeaderItem(val date: String) : NotificationListItem()
+}
+
 
 class NotificationViewModel(private val repository: NotificationRepository) : ViewModel() {
 
@@ -42,7 +49,7 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         }
     }
 
-    // MediatorLiveData to combine app filter and search filter
+    // Original LiveData for a flat, filtered list. Still used for search and selection logic.
     val notifications: LiveData<List<CapturedNotification>> = MediatorLiveData<List<CapturedNotification>>().apply {
         addSource(notificationsFromRepository) { list ->
             value = filterNotifications(list, _searchQuery.value)
@@ -51,6 +58,12 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
             value = filterNotifications(notificationsFromRepository.value, query)
         }
     }
+
+    // New LiveData that transforms the flat list into a list with date headers.
+    val groupedNotifications: LiveData<List<NotificationListItem>> = notifications.map { flatList ->
+        groupNotificationsByDate(flatList)
+    }
+
 
     private val _isSelectionModeActive = MutableStateFlow(false)
     val isSelectionModeActive: StateFlow<Boolean> = _isSelectionModeActive.asStateFlow()
@@ -70,6 +83,38 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
                     (notification.title?.lowercase(Locale.getDefault())?.contains(lowerCaseQuery) == true) ||
                     (notification.textContent?.lowercase(Locale.getDefault())?.contains(lowerCaseQuery) == true)
         }
+    }
+    private fun groupNotificationsByDate(notifications: List<CapturedNotification>?): List<NotificationListItem> {
+        if (notifications.isNullOrEmpty()) {
+            return emptyList()
+        }
+
+        val items = mutableListOf<NotificationListItem>()
+        val today = Calendar.getInstance()
+        val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+        val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
+
+        var lastHeaderDay = -1
+        var lastHeaderYear = -1
+
+        notifications.forEach { notification ->
+            val currentCal = Calendar.getInstance().apply { timeInMillis = notification.postTimeMillis }
+            val currentDay = currentCal.get(Calendar.DAY_OF_YEAR)
+            val currentYear = currentCal.get(Calendar.YEAR)
+
+            if (currentDay != lastHeaderDay || currentYear != lastHeaderYear) {
+                val headerText = when {
+                    currentDay == today.get(Calendar.DAY_OF_YEAR) && currentYear == today.get(Calendar.YEAR) -> "Today"
+                    currentDay == yesterday.get(Calendar.DAY_OF_YEAR) && currentYear == yesterday.get(Calendar.YEAR) -> "Yesterday"
+                    else -> dateFormat.format(currentCal.time)
+                }
+                items.add(NotificationListItem.HeaderItem(headerText))
+                lastHeaderDay = currentDay
+                lastHeaderYear = currentYear
+            }
+            items.add(NotificationListItem.NotificationItem(notification))
+        }
+        return items
     }
 
     val uniqueAppNamesForFilter: LiveData<List<String>> = repository.uniqueAppNamesForFilter
@@ -103,9 +148,6 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     fun deleteAllNotifications() {
         viewModelScope.launch(Dispatchers.IO) { // Perform database operations on a background thread
             repository.deleteAllNotifications()
-            // You might not need to explicitly update the LiveData here if your LiveData
-            // source from the repository automatically updates when the underlying data changes.
-            // If it doesn't, you might need to re-fetch or clear the current list.
         }
     }
 
@@ -126,10 +168,6 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     fun toggleNotificationSelection(notificationId: Long) {
         if (_selectedNotificationIds.contains(notificationId)) {
             _selectedNotificationIds.remove(notificationId)
-            // If no items are selected anymore, optionally deactivate selection mode
-            if (_selectedNotificationIds.isEmpty() && _isSelectionModeActive.value) {
-                // _isSelectionModeActive.value = false // Or keep it active until explicitly closed
-            }
         } else {
             _selectedNotificationIds.add(notificationId)
         }

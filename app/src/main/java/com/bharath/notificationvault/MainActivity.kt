@@ -13,49 +13,46 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
@@ -63,25 +60,25 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
-
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
 import com.bharath.notificationvault.data.db.AppDatabase
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import com.bharath.notificationvault.ui.theme.NotificationVaultTheme
+import com.bharath.notificationvault.ui.viewmodel.NotificationListItem
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
-
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
 class MainActivity : ComponentActivity() {
@@ -134,6 +131,8 @@ fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
 @Composable
 fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
     val notifications by viewModel.notifications.observeAsState(emptyList())
+    val groupedItems by viewModel.groupedNotifications.observeAsState(emptyList())
+
     val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
     var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
     var filterDropdownExpanded by remember { mutableStateOf(false) }
@@ -270,7 +269,8 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 NotificationListContent(
-                    notifications = notifications,
+                    groupedItems = groupedItems,
+                    notifications = notifications, // Pass flat list for FastScroller
                     viewModel = viewModel,
                     searchQuery = searchQuery,
                     isSelectionModeActive = isSelectionModeActive,
@@ -281,21 +281,22 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun NotificationListContent(
-    notifications: List<CapturedNotification>,
+    groupedItems: List<NotificationListItem>,
+    notifications: List<CapturedNotification>, // This is the original flat list for the scroller
     viewModel: NotificationViewModel,
     searchQuery: String?,
     isSelectionModeActive: Boolean,
     selectedNotificationIds: List<Long>
 ) {
     val context = LocalContext.current
-    // Create the LazyListState to be shared between the list and the scroller
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    if (notifications.isEmpty()) {
+    if (groupedItems.isEmpty()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -305,43 +306,55 @@ fun NotificationListContent(
             Text(stringResource(id = R.string.no_notifications_message))
         }
     } else {
-        // BoxWithConstraints is used to overlay the scroller on top of the list.
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                state = listState // Assign the state to the LazyColumn
+                state = listState
             ) {
-                items(notifications, key = { it.id }) { notification ->
-                    val isSelected = selectedNotificationIds.contains(notification.id)
-                    NotificationItem(
-                        notification = notification,
-                        context = context,
-                        searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
-                        isSelected = isSelected,
-                        isSelectionModeActive = isSelectionModeActive,
-                        onItemClick = {
-                            if (isSelectionModeActive) {
-                                viewModel.toggleNotificationSelection(notification.id)
+                groupedItems.forEach { listItem ->
+                    when (listItem) {
+                        is NotificationListItem.HeaderItem -> {
+                            stickyHeader(key = listItem.date) {
+                                DateHeader(text = listItem.date)
                             }
-                        },
-                        onItemLongClick = {
-                            viewModel.activateSelectionMode(notification.id)
                         }
-                    )
-                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                        is NotificationListItem.NotificationItem -> {
+                            val notification = listItem.notification
+                            item(key = notification.id) {
+                                val isSelected = selectedNotificationIds.contains(notification.id)
+                                NotificationItem(
+                                    notification = notification,
+                                    context = context,
+                                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
+                                    isSelected = isSelected,
+                                    isSelectionModeActive = isSelectionModeActive,
+                                    onItemClick = {
+                                        if (isSelectionModeActive) {
+                                            viewModel.toggleNotificationSelection(notification.id)
+                                        }
+                                    },
+                                    onItemLongClick = {
+                                        viewModel.activateSelectionMode(notification.id)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
                 }
             }
 
             // The custom FastScroller composable
             FastScroller(
                 listState = listState,
-                notifications = notifications,
+                notifications = notifications, // Use the flat list for date calculations
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .fillMaxHeight()
             ) { targetIndex ->
-                // This is the callback that scrolls the list
                 coroutineScope.launch {
+                    // This might need adjustment if the scroller and list get out of sync
+                    // For now, we assume the flat list index corresponds reasonably well.
                     listState.scrollToItem(targetIndex)
                 }
             }
@@ -401,11 +414,28 @@ fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
             text = stringResource(id = R.string.notification_access_required_message),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(bottom = 24.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            textAlign = TextAlign.Center
         )
         Button(onClick = onRequestAccess) {
             Text(stringResource(id = R.string.open_settings_button))
         }
+    }
+}
+
+@Composable
+fun DateHeader(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
     }
 }
 
