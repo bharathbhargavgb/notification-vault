@@ -21,7 +21,7 @@ interface NotificationDao {
     @Query("SELECT * FROM notifications WHERE packageName = :packageName AND postTimeMillis >= :sevenDaysAgoMillis ORDER BY postTimeMillis DESC")
     fun getNotificationsByAppLast7Days(packageName: String, sevenDaysAgoMillis: Long): LiveData<List<CapturedNotification>>
 
-    @Query("SELECT DISTINCT appName FROM notifications ORDER BY appName ASC") // Using appName for filter display
+    @Query("SELECT DISTINCT appName FROM notifications ORDER BY appName COLLATE NOCASE ASC") // Using appName for filter display
     fun getUniqueAppNames(): LiveData<List<String>>
 
     // Get package name for a given app name (assumes app names are unique enough for this purpose)

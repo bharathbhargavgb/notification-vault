@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -480,22 +481,26 @@ fun DefaultTopAppBar(
             }
 
             Box {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable { onFilterDropdownExpandedChange(true) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                ) {
                     if (!isSearchActive) {
                         Text(
-                            selectedAppNameForFilter?.take(10)
+                            text = selectedAppNameForFilter?.take(10)
                                 ?: stringResource(id = R.string.all_apps_filter_short),
                             fontSize = 12.sp,
                             maxLines = 1,
-                            modifier = Modifier.padding(start = 4.dp, end = 0.dp)
+                            modifier = Modifier.padding(end = 2.dp)
                         )
                     }
-                    IconButton(onClick = { onFilterDropdownExpandedChange(true) }) {
-                        Icon(
-                            Icons.Default.ArrowDropDown,
-                            contentDescription = stringResource(id = R.string.filter_by_app_description)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = stringResource(id = R.string.filter_by_app_description)
+                    )
                 }
                 DropdownMenu(
                     expanded = filterDropdownExpanded,
