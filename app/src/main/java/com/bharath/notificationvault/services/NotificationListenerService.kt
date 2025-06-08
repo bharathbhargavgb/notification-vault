@@ -99,15 +99,21 @@ class NotificationListenerService : NotificationListenerService() {
         }
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        super.onNotificationRemoved(sbn)
-        sbn?.let {
-            serviceScope.launch {
-                try {
-                    notificationDao.markAsDismissed(it.key)
-                    Log.d(TAG, "Notification marked as dismissed: ${it.packageName} - ${it.notification.extras.getString(Notification.EXTRA_TITLE)}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error marking notification as dismissed", e)
+    override fun onNotificationRemoved(sbn: StatusBarNotification?, rankingMap: RankingMap?, reason: Int) {
+        super.onNotificationRemoved(sbn, rankingMap, reason)
+
+        if (reason == REASON_CANCEL || reason == REASON_CANCEL_ALL) {
+            sbn?.let { statusBarNotification ->
+                serviceScope.launch {
+                    try {
+                        notificationDao.markAsDismissed(statusBarNotification.key)
+                        Log.d(
+                            TAG,
+                            "Notification marked as user-dismissed: ${statusBarNotification.packageName}"
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error marking notification as dismissed", e)
+                    }
                 }
             }
         }
