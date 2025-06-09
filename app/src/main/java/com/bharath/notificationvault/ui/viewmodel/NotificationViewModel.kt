@@ -6,10 +6,13 @@ import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.asLiveData
 import androidx.lifecycle.map
 import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
+import com.bharath.notificationvault.data.db.entity.FilterRule
+import com.bharath.notificationvault.data.db.entity.IgnoredApp
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,12 +24,10 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-// Enum to represent the time periods for sub-grouping
 private enum class TimeOfDay {
     UNGODLY, MORNING, AFTERNOON, EVENING, NIGHT
 }
 
-// Updated sealed class to include a sub-header type
 sealed class NotificationListItem {
     data class NotificationItem(val notification: CapturedNotification) : NotificationListItem()
     data class HeaderItem(val date: String) : NotificationListItem()
@@ -36,14 +37,16 @@ sealed class NotificationListItem {
 
 class NotificationViewModel(private val repository: NotificationRepository) : ViewModel() {
 
-    private val _selectedAppNameFilter = MutableLiveData<String?>(null) // Filter by app name (display value)
-    private val _searchQuery = MutableLiveData<String?>(null) // For search text
-    private val _selectedTab = MutableLiveData<Int>(0) // 0 for All, 1 for Dismissed
-
-    // Helper LiveData to trigger the query based on package name
+    private val _selectedAppNameFilter = MutableLiveData<String?>(null)
+    private val _searchQuery = MutableLiveData<String?>(null)
+    private val _selectedTab = MutableLiveData<Int>(0)
     private val _packageNameForQuery = MutableLiveData<String?>(null)
 
-    // LiveData that fetches from the repository based on the app filter and tab
+    // --- LiveData for Ignore Rules ---
+    val ignoredApps: LiveData<List<IgnoredApp>> = repository.ignoredApps.asLiveData()
+    val filterRules: LiveData<List<FilterRule>> = repository.filterRules.asLiveData()
+
+
     private val notificationsFromRepository: LiveData<List<CapturedNotification>> = _selectedTab.switchMap { tab ->
         _packageNameForQuery.switchMap { pkgName ->
             val source = when (tab) {
@@ -55,17 +58,27 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         }
     }
 
-    // Original LiveData for a flat, filtered list. Still used for search and selection logic.
     val notifications: LiveData<List<CapturedNotification>> = MediatorLiveData<List<CapturedNotification>>().apply {
-        addSource(notificationsFromRepository) { list ->
-            value = filterNotifications(list, _searchQuery.value)
+        var rawList: List<CapturedNotification>? = null
+        var ignoredList: List<IgnoredApp>? = null
+        var rulesList: List<FilterRule>? = null
+
+        fun update() {
+            if (rawList != null && ignoredList != null && rulesList != null) {
+                viewModelScope.launch(Dispatchers.Default) {
+                    val searchFiltered = filterNotifications(rawList, _searchQuery.value)
+                    val ignoreFiltered = applyIgnoreRules(searchFiltered, ignoredList!!, rulesList!!)
+                    postValue(ignoreFiltered)
+                }
+            }
         }
-        addSource(_searchQuery) { query ->
-            value = filterNotifications(notificationsFromRepository.value, query)
-        }
+
+        addSource(notificationsFromRepository) { rawList = it; update() }
+        addSource(ignoredApps) { ignoredList = it; update() }
+        addSource(filterRules) { rulesList = it; update() }
+        addSource(_searchQuery) { update() }
     }
 
-    // New LiveData that transforms the flat list into a list with date headers.
     val groupedNotifications: LiveData<List<NotificationListItem>> = notifications.map { flatList ->
         groupNotificationsByDate(flatList)
     }
@@ -74,9 +87,44 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
     private val _isSelectionModeActive = MutableStateFlow(false)
     val isSelectionModeActive: StateFlow<Boolean> = _isSelectionModeActive.asStateFlow()
 
-    // Using SnapshotStateList for efficient recomposition when items are added/removed
     private val _selectedNotificationIds = mutableStateListOf<Long>()
     val selectedNotificationIds: List<Long> get() = _selectedNotificationIds
+
+    private fun applyIgnoreRules(
+        notifications: List<CapturedNotification>,
+        ignoredApps: List<IgnoredApp>,
+        filterRules: List<FilterRule>
+    ): List<CapturedNotification> {
+        if (ignoredApps.isEmpty() && filterRules.isEmpty()) {
+            return notifications
+        }
+
+        val ignoredPackageNames = ignoredApps.map { it.packageName }.toSet()
+
+        return notifications.filter { notification ->
+            if (notification.packageName in ignoredPackageNames) {
+                return@filter false
+            }
+
+            val matchesAnyRule = filterRules.any { rule ->
+                val appMatch = rule.packageName == null || rule.packageName == notification.packageName
+                if (!appMatch) return@any false
+
+                val title = notification.title ?: ""
+                val content = notification.textContent ?: ""
+
+                val titleMatch = rule.titleKeyword.isNullOrBlank() || title.contains(rule.titleKeyword, ignoreCase = true)
+                val contentMatch = rule.contentKeyword.isNullOrBlank() || content.contains(rule.contentKeyword, ignoreCase = true)
+
+                val hasKeywords = !rule.titleKeyword.isNullOrBlank() || !rule.contentKeyword.isNullOrBlank()
+
+                hasKeywords && titleMatch && contentMatch
+            }
+
+            !matchesAnyRule
+        }
+    }
+
 
     private fun filterNotifications(notifications: List<CapturedNotification>?, query: String?): List<CapturedNotification> {
         val currentList = notifications ?: emptyList()
@@ -91,41 +139,30 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         }
     }
 
-    /**
-     * Helper function to determine the time of day based on the user's specified ranges.
-     */
     private fun getTimeOfDay(calendar: Calendar): TimeOfDay {
         return when (calendar.get(Calendar.HOUR_OF_DAY)) {
-            in 0..5 -> TimeOfDay.UNGODLY      // 12:00 AM - 5:59 AM
-            in 6..11 -> TimeOfDay.MORNING     // 6:00 AM - 11:59 AM
-            in 12..15 -> TimeOfDay.AFTERNOON  // 12:00 PM - 3:59 PM
-            in 16..20 -> TimeOfDay.EVENING    // 4:00 PM - 8:59 PM
-            else -> TimeOfDay.NIGHT           // 9:00 PM - 11:59 PM
+            in 0..5 -> TimeOfDay.UNGODLY
+            in 6..11 -> TimeOfDay.MORNING
+            in 12..15 -> TimeOfDay.AFTERNOON
+            in 16..20 -> TimeOfDay.EVENING
+            else -> TimeOfDay.NIGHT
         }
     }
 
-
     private fun groupNotificationsByDate(notifications: List<CapturedNotification>?): List<NotificationListItem> {
-        if (notifications.isNullOrEmpty()) {
-            return emptyList()
-        }
-
+        if (notifications.isNullOrEmpty()) return emptyList()
         val items = mutableListOf<NotificationListItem>()
         val today = Calendar.getInstance()
         val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-        val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
-
+        val dateFormat = SimpleDateFormat("MMMM d, YYYY", Locale.getDefault())
         var lastHeaderDay = -1
         var lastHeaderYear = -1
         var lastTimeOfDay: TimeOfDay? = null
-
         notifications.forEach { notification ->
             val currentCal = Calendar.getInstance().apply { timeInMillis = notification.postTimeMillis }
             val currentDay = currentCal.get(Calendar.DAY_OF_YEAR)
             val currentYear = currentCal.get(Calendar.YEAR)
             val currentTimeOfDay = getTimeOfDay(currentCal)
-
-            // Check if a new Date header is needed
             if (currentDay != lastHeaderDay || currentYear != lastHeaderYear) {
                 val headerText = when {
                     currentDay == today.get(Calendar.DAY_OF_YEAR) && currentYear == today.get(Calendar.YEAR) -> "Today"
@@ -135,10 +172,8 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
                 items.add(NotificationListItem.HeaderItem(headerText))
                 lastHeaderDay = currentDay
                 lastHeaderYear = currentYear
-                lastTimeOfDay = null // Reset time of day for the new date
+                lastTimeOfDay = null
             }
-
-            // Check if a new Time of Day sub-header is needed
             if (currentTimeOfDay != lastTimeOfDay) {
                 val subHeaderText = when (currentTimeOfDay) {
                     TimeOfDay.UNGODLY -> "Ungodly Hours"
@@ -147,84 +182,62 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
                     TimeOfDay.EVENING -> "Evening"
                     TimeOfDay.NIGHT -> "Night"
                 }
-                // Create a stable ID for the sub-header item
                 val subHeaderId = "$currentYear-$currentDay-${currentTimeOfDay.name}"
                 items.add(NotificationListItem.SubHeaderItem(subHeaderText, subHeaderId))
                 lastTimeOfDay = currentTimeOfDay
             }
-
             items.add(NotificationListItem.NotificationItem(notification))
         }
         return items
     }
 
-    val uniqueAppNamesForFilter: LiveData<List<String>> = repository.uniqueAppNamesForFilter
+    // The list of unique app names for the filter is now derived from the final,
+    // filtered list of notifications, ensuring it's always up-to-date.
+    val uniqueAppNamesForFilter: LiveData<List<String>> = notifications.map { notificationList ->
+        notificationList.map { it.appName }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
 
     fun setAppFilter(appName: String?) {
         _selectedAppNameFilter.value = appName
         if (appName == null) {
             _packageNameForQuery.value = null
         } else {
-            viewModelScope.launch {
-                _packageNameForQuery.value = repository.getPackageNameByAppName(appName)
-            }
+            viewModelScope.launch { _packageNameForQuery.value = repository.getPackageNameByAppName(appName) }
         }
     }
 
-    fun setSearchQuery(query: String?) {
-        _searchQuery.value = query
-    }
+    fun setSearchQuery(query: String?) { _searchQuery.value = query }
+    fun setSelectedTab(index: Int) { _selectedTab.value = index }
+    fun cleanupOldNotifications() { viewModelScope.launch { repository.deleteOldNotifications() } }
+    fun deleteAllNotifications() { viewModelScope.launch(Dispatchers.IO) { repository.deleteAllNotifications() } }
 
-    fun setSelectedTab(index: Int) {
-        _selectedTab.value = index
-    }
-
-    fun cleanupOldNotifications() {
-        viewModelScope.launch {
-            repository.deleteOldNotifications()
-        }
-    }
-
-    fun deleteAllNotifications() {
-        viewModelScope.launch(Dispatchers.IO) {
-            repository.deleteAllNotifications()
-        }
-    }
+    fun ignoreApp(packageName: String) = viewModelScope.launch { repository.addIgnoredApp(packageName) }
+    fun unignoreApp(packageName: String) = viewModelScope.launch { repository.removeIgnoredApp(packageName) }
+    fun saveFilterRule(rule: FilterRule) = viewModelScope.launch { repository.addFilterRule(rule) }
+    fun deleteFilterRule(rule: FilterRule) = viewModelScope.launch { repository.deleteFilterRule(rule) }
 
     fun toggleSelectionMode() {
         _isSelectionModeActive.update { !it }
-        if (!_isSelectionModeActive.value) {
-            clearSelection()
-        }
+        if (!_isSelectionModeActive.value) clearSelection()
     }
 
     fun activateSelectionMode(initialSelectedId: Long) {
-        if (!_isSelectionModeActive.value) {
-            _isSelectionModeActive.value = true
-        }
+        if (!_isSelectionModeActive.value) _isSelectionModeActive.value = true
         toggleNotificationSelection(initialSelectedId)
     }
 
     fun toggleNotificationSelection(notificationId: Long) {
-        if (_selectedNotificationIds.contains(notificationId)) {
-            _selectedNotificationIds.remove(notificationId)
-        } else {
-            _selectedNotificationIds.add(notificationId)
-        }
+        if (_selectedNotificationIds.contains(notificationId)) _selectedNotificationIds.remove(notificationId)
+        else _selectedNotificationIds.add(notificationId)
     }
 
-    fun clearSelection() {
-        _selectedNotificationIds.clear()
-    }
+    fun clearSelection() { _selectedNotificationIds.clear() }
 
     fun selectAllVisible(visibleNotificationIds: List<Long>) {
         _selectedNotificationIds.clear()
         _selectedNotificationIds.addAll(visibleNotificationIds.filterNot { _selectedNotificationIds.contains(it) })
-        if (_selectedNotificationIds.isNotEmpty() && !_isSelectionModeActive.value) {
-            _isSelectionModeActive.value = true
-        }
+        if (_selectedNotificationIds.isNotEmpty() && !_isSelectionModeActive.value) _isSelectionModeActive.value = true
     }
-
 
     fun deleteSelectedNotifications() {
         if (_selectedNotificationIds.isNotEmpty()) {

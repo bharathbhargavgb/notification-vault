@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,15 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -65,28 +58,37 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
+import androidx.core.text.HtmlCompat
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 import com.bharath.notificationvault.data.db.AppDatabase
 import com.bharath.notificationvault.data.db.entity.CapturedNotification
+import com.bharath.notificationvault.data.db.entity.FilterRule
+import com.bharath.notificationvault.data.db.entity.IgnoredApp
 import com.bharath.notificationvault.data.repository.NotificationRepository
 import com.bharath.notificationvault.ui.theme.NotificationVaultTheme
 import com.bharath.notificationvault.ui.viewmodel.NotificationListItem
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModel
 import com.bharath.notificationvault.ui.viewmodel.NotificationViewModelFactory
+
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.ExperimentalFoundationApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 
 class MainActivity : ComponentActivity() {
 
     private val notificationViewModel: NotificationViewModel by viewModels {
+        val database = AppDatabase.getDatabase(applicationContext)
         NotificationViewModelFactory(
             NotificationRepository(
-                AppDatabase.getDatabase(applicationContext).notificationDao()
+                database.notificationDao(),
+                database.ignoredAppDao(),
+                database.filterRuleDao()
             )
         )
     }
@@ -113,8 +115,15 @@ class MainActivity : ComponentActivity() {
 fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
     val context = LocalContext.current
 
-    val hasNotificationAccess by remember(permissionCheckKey) {
+    // Create a state holder for the permission status.
+    var hasNotificationAccess by remember {
         mutableStateOf(isNotificationServiceEnabled(context))
+    }
+
+    // Use a LaunchedEffect to re-check the permission whenever the key changes.
+    // This is a more explicit way to handle side-effects from state changes.
+    LaunchedEffect(permissionCheckKey) {
+        hasNotificationAccess = isNotificationServiceEnabled(context)
     }
 
     if (!hasNotificationAccess) {
@@ -125,243 +134,6 @@ fun MainAppScreen(viewModel: NotificationViewModel, permissionCheckKey: Int) {
         NotificationScreenWithTabs(viewModel)
     }
 }
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
-@Composable
-fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
-    val notifications by viewModel.notifications.observeAsState(emptyList())
-    val groupedItems by viewModel.groupedNotifications.observeAsState(emptyList())
-
-    val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
-    var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
-    var filterDropdownExpanded by remember { mutableStateOf(false) }
-
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
-
-    val isSelectionModeActive by viewModel.isSelectionModeActive.collectAsState()
-    val selectedNotificationIds = viewModel.selectedNotificationIds
-
-    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
-    var showDeleteAllDialog by remember { mutableStateOf(false) }
-
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusRequester = remember { FocusRequester() }
-    val focusManager = LocalFocusManager.current
-
-    val tabTitles = listOf("All", "Dismissed")
-    var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val pagerState = rememberPagerState { tabTitles.size }
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        viewModel.cleanupOldNotifications()
-    }
-
-    LaunchedEffect(searchQuery) {
-        viewModel.setSearchQuery(searchQuery.ifBlank { null })
-    }
-
-    LaunchedEffect(isSearchActive) {
-        if (isSearchActive) {
-            try {
-                focusRequester.requestFocus()
-                keyboardController?.show()
-            } catch (e: Exception) {
-                println("Focus request failed: ${e.message}")
-            }
-        } else {
-            keyboardController?.hide()
-            focusManager.clearFocus()
-        }
-    }
-
-    LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
-        if (!pagerState.isScrollInProgress) {
-            selectedTabIndex = pagerState.currentPage
-            viewModel.setSelectedTab(pagerState.currentPage)
-        }
-    }
-
-    if (showDeleteAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteAllDialog = false },
-            title = { Text(stringResource(id = R.string.confirm_delete_all_title)) },
-            text = { Text(stringResource(id = R.string.confirm_delete_all_message)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteAllNotifications()
-                    showDeleteAllDialog = false
-                }) { Text(stringResource(id = R.string.delete_all_button_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteAllDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
-            }
-        )
-    }
-
-    if (showDeleteSelectedDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteSelectedDialog = false },
-            title = { Text(stringResource(id = R.string.confirm_delete_selected_title)) },
-            text = { Text(stringResource(R.string.confirm_delete_selected_message, selectedNotificationIds.size)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteSelectedNotifications()
-                    showDeleteSelectedDialog = false
-                }) { Text(stringResource(id = R.string.delete_button_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteSelectedDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
-            }
-        )
-    }
-
-    Scaffold(
-        topBar = {
-            if (isSelectionModeActive) {
-                SelectionModeTopAppBar(
-                    selectedItemCount = selectedNotificationIds.size,
-                    onCloseSelectionMode = { viewModel.toggleSelectionMode() },
-                    onDeleteSelected = { showDeleteSelectedDialog = true },
-                    onSelectAll = {
-                        val allVisibleIds = notifications.map { it.id }
-                        viewModel.selectAllVisible(allVisibleIds)
-                    }
-                )
-            } else {
-                DefaultTopAppBar(
-                    viewModel = viewModel,
-                    isSearchActive = isSearchActive,
-                    searchQuery = searchQuery,
-                    onSearchQueryChange = { searchQuery = it },
-                    onSearchActiveChange = { isSearchActive = it },
-                    appNamesForFilter = appNamesForFilter,
-                    selectedAppNameForFilter = selectedAppNameForFilter,
-                    onSelectedAppNameForFilterChange = { selectedAppNameForFilter = it },
-                    filterDropdownExpanded = filterDropdownExpanded,
-                    onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
-                    onShowDeleteAllDialog = { showDeleteAllDialog = true }
-                )
-            }
-        }
-    ) { paddingValues ->
-        Column(modifier = Modifier.padding(paddingValues)) {
-            TabRow(selectedTabIndex = selectedTabIndex) {
-                tabTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTabIndex == index,
-                        onClick = {
-                            selectedTabIndex = index
-                            viewModel.setSelectedTab(index)
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(index)
-                            }
-                        },
-                        text = { Text(text = title) }
-                    )
-                }
-            }
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                NotificationListContent(
-                    groupedItems = groupedItems,
-                    notifications = notifications,
-                    viewModel = viewModel,
-                    searchQuery = searchQuery,
-                    isSelectionModeActive = isSelectionModeActive,
-                    selectedNotificationIds = selectedNotificationIds
-                )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@SuppressLint("UnusedBoxWithConstraintsScope")
-@Composable
-fun NotificationListContent(
-    groupedItems: List<NotificationListItem>,
-    notifications: List<CapturedNotification>,
-    viewModel: NotificationViewModel,
-    searchQuery: String?,
-    isSelectionModeActive: Boolean,
-    selectedNotificationIds: List<Long>
-) {
-    val context = LocalContext.current
-    val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
-
-    if (groupedItems.isEmpty()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(stringResource(id = R.string.no_notifications_message))
-        }
-    } else {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                state = listState
-            ) {
-                groupedItems.forEach { listItem ->
-                    when (listItem) {
-                        is NotificationListItem.HeaderItem -> {
-                            stickyHeader(key = listItem.date) {
-                                DateHeader(text = listItem.date)
-                            }
-                        }
-                        is NotificationListItem.SubHeaderItem -> {
-                            item(key = listItem.id) {
-                                TimeOfDayHeader(text = listItem.timeOfDay)
-                            }
-                        }
-                        is NotificationListItem.NotificationItem -> {
-                            val notification = listItem.notification
-                            item(key = notification.id) {
-                                val isSelected = selectedNotificationIds.contains(notification.id)
-                                NotificationItem(
-                                    notification = notification,
-                                    context = context,
-                                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
-                                    isSelected = isSelected,
-                                    isSelectionModeActive = isSelectionModeActive,
-                                    onItemClick = {
-                                        if (isSelectionModeActive) {
-                                            viewModel.toggleNotificationSelection(notification.id)
-                                        }
-                                    },
-                                    onItemLongClick = {
-                                        viewModel.activateSelectionMode(notification.id)
-                                    }
-                                )
-                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                            }
-                        }
-                    }
-                }
-            }
-
-            FastScroller(
-                listState = listState,
-                notifications = notifications,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .fillMaxHeight()
-            ) { targetIndex ->
-                coroutineScope.launch {
-                    listState.scrollToItem(targetIndex)
-                }
-            }
-        }
-    }
-}
-
 
 fun isNotificationServiceEnabled(context: Context): Boolean {
     val pkgName = context.packageName
@@ -386,7 +158,6 @@ fun requestNotificationAccess(context: Context) {
     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
     context.startActivity(intent)
 }
-
 
 @Composable
 fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
@@ -422,6 +193,265 @@ fun NotificationAccessScreen(onRequestAccess: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
+@Composable
+fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
+    val notifications by viewModel.notifications.observeAsState(emptyList())
+    val groupedItems by viewModel.groupedNotifications.observeAsState(emptyList())
+    val ignoredApps by viewModel.ignoredApps.observeAsState(emptyList())
+    val filterRules by viewModel.filterRules.observeAsState(emptyList())
+
+    val appNamesForFilter by viewModel.uniqueAppNamesForFilter.observeAsState(emptyList())
+    var selectedAppNameForFilter by remember { mutableStateOf<String?>(null) }
+    var filterDropdownExpanded by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchActive by remember { mutableStateOf(false) }
+
+    val isSelectionModeActive by viewModel.isSelectionModeActive.collectAsState()
+    val selectedNotificationIds = viewModel.selectedNotificationIds
+
+    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+
+    var showManageRulesScreen by remember { mutableStateOf(false) }
+    var notificationToCreateRuleFor by remember { mutableStateOf<CapturedNotification?>(null) }
+
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+
+    val tabTitles = listOf("All", "Dismissed")
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    val pagerState = rememberPagerState { tabTitles.size }
+    val coroutineScope = rememberCoroutineScope()
+
+    val selectedNotification = remember(selectedNotificationIds.size, notifications) {
+        if (selectedNotificationIds.size == 1) {
+            val selectedId = selectedNotificationIds.first()
+            notifications.find { it.id == selectedId }
+        } else {
+            null
+        }
+    }
+
+    LaunchedEffect(Unit) { viewModel.cleanupOldNotifications() }
+    LaunchedEffect(searchQuery) { viewModel.setSearchQuery(searchQuery.ifBlank { null }) }
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) {
+            try {
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (e: Exception) {
+                println("Focus request failed: ${e.message}")
+            }
+        } else {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
+    }
+    LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
+        if (!pagerState.isScrollInProgress) {
+            selectedTabIndex = pagerState.currentPage
+            viewModel.setSelectedTab(pagerState.currentPage)
+        }
+    }
+
+    // --- DIALOGS ---
+    // Dialogs can be placed at the top level of the composable logic.
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_all_title)) },
+            text = { Text(stringResource(id = R.string.confirm_delete_all_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteAllNotifications()
+                    showDeleteAllDialog = false
+                }) { Text(stringResource(id = R.string.delete_all_button_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
+            }
+        )
+    }
+    if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            title = { Text(stringResource(id = R.string.confirm_delete_selected_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_selected_message, selectedNotificationIds.size)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteSelectedNotifications()
+                    showDeleteSelectedDialog = false
+                }) { Text(stringResource(id = R.string.delete_button_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) { Text(stringResource(id = R.string.cancel_button)) }
+            }
+        )
+    }
+    notificationToCreateRuleFor?.let { notification ->
+        CreateRuleDialog(
+            notification = notification,
+            onDismiss = { notificationToCreateRuleFor = null },
+            onSaveRule = {
+                viewModel.saveFilterRule(it)
+                notificationToCreateRuleFor = null
+            }
+        )
+    }
+
+    // --- SCREEN CONTENT SWITCH ---
+    // Use an if/else to swap between the main screen and the management screen.
+    if (showManageRulesScreen) {
+        ManageIgnoreRulesScreen(
+            ignoredApps = ignoredApps,
+            filterRules = filterRules,
+            onClose = { showManageRulesScreen = false },
+            onUnignoreApp = { viewModel.unignoreApp(it.packageName) },
+            onDeleteRule = { viewModel.deleteFilterRule(it) }
+        )
+    } else {
+        Scaffold(
+            topBar = {
+                if (isSelectionModeActive) {
+                    SelectionModeTopAppBar(
+                        selectedItemCount = selectedNotificationIds.size,
+                        selectedNotification = selectedNotification,
+                        onCloseSelectionMode = { viewModel.toggleSelectionMode() },
+                        onDeleteSelected = { showDeleteSelectedDialog = true },
+                        onSelectAll = {
+                            val allVisibleIds = notifications.map { it.id }
+                            viewModel.selectAllVisible(allVisibleIds)
+                        },
+                        onIgnoreApp = { notification ->
+                            viewModel.ignoreApp(notification.packageName)
+                            viewModel.toggleSelectionMode() // Exit selection mode after action
+                        },
+                        onCreateRule = { notification ->
+                            notificationToCreateRuleFor = notification
+                            viewModel.toggleSelectionMode() // Exit selection mode after action
+                        }
+                    )
+                } else {
+                    DefaultTopAppBar(
+                        viewModel = viewModel,
+                        isSearchActive = isSearchActive,
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { searchQuery = it },
+                        onSearchActiveChange = { isSearchActive = it },
+                        appNamesForFilter = appNamesForFilter,
+                        selectedAppNameForFilter = selectedAppNameForFilter,
+                        onSelectedAppNameForFilterChange = { selectedAppNameForFilter = it },
+                        filterDropdownExpanded = filterDropdownExpanded,
+                        onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
+                        onShowDeleteAllDialog = { showDeleteAllDialog = true },
+                        onShowManageRules = { showManageRulesScreen = true }
+                    )
+                }
+            }
+        ) { paddingValues ->
+            Column(modifier = Modifier.padding(paddingValues)) {
+                TabRow(selectedTabIndex = selectedTabIndex) {
+                    tabTitles.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = {
+                                selectedTabIndex = index
+                                viewModel.setSelectedTab(index)
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(index)
+                                }
+                            },
+                            text = { Text(text = title) }
+                        )
+                    }
+                }
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    NotificationListContent(
+                        groupedItems = groupedItems,
+                        notifications = notifications,
+                        viewModel = viewModel,
+                        searchQuery = searchQuery,
+                        isSelectionModeActive = isSelectionModeActive,
+                        selectedNotificationIds = selectedNotificationIds
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+fun NotificationListContent(
+    groupedItems: List<NotificationListItem>,
+    notifications: List<CapturedNotification>,
+    viewModel: NotificationViewModel,
+    searchQuery: String?,
+    isSelectionModeActive: Boolean,
+    selectedNotificationIds: List<Long>
+) {
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    if (groupedItems.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+            Text(stringResource(id = R.string.no_notifications_message))
+        }
+    } else {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
+                groupedItems.forEach { listItem ->
+                    when (listItem) {
+                        is NotificationListItem.HeaderItem -> {
+                            stickyHeader(key = listItem.date) { DateHeader(text = listItem.date) }
+                        }
+                        is NotificationListItem.SubHeaderItem -> {
+                            item(key = listItem.id) { TimeOfDayHeader(text = listItem.timeOfDay) }
+                        }
+                        is NotificationListItem.NotificationItem -> {
+                            val notification = listItem.notification
+                            item(key = notification.id) {
+                                val isSelected = selectedNotificationIds.contains(notification.id)
+                                NotificationItem(
+                                    notification = notification,
+                                    context = context,
+                                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
+                                    isSelected = isSelected,
+                                    isSelectionModeActive = isSelectionModeActive,
+                                    onItemClick = {
+                                        if (isSelectionModeActive) {
+                                            viewModel.toggleNotificationSelection(notification.id)
+                                        }
+                                    },
+                                    onItemLongClick = {
+                                        viewModel.activateSelectionMode(notification.id)
+                                    }
+                                )
+                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
+                }
+            }
+            FastScroller(
+                listState = listState,
+                notifications = notifications,
+                modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight()
+            ) { targetIndex ->
+                coroutineScope.launch { listState.scrollToItem(targetIndex) }
+            }
+        }
+    }
+}
+
 @Composable
 fun DateHeader(text: String) {
     Surface(
@@ -452,6 +482,270 @@ fun TimeOfDayHeader(text: String) {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SelectionModeTopAppBar(
+    selectedItemCount: Int,
+    selectedNotification: CapturedNotification?,
+    onCloseSelectionMode: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onSelectAll: () -> Unit,
+    onIgnoreApp: (CapturedNotification) -> Unit,
+    onCreateRule: (CapturedNotification) -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    TopAppBar(
+        title = { Text(stringResource(R.string.selected_items_count, selectedItemCount)) },
+        navigationIcon = {
+            IconButton(onClick = onCloseSelectionMode) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.close_selection_mode_description))
+            }
+        },
+        actions = {
+            IconButton(onClick = onSelectAll) {
+                Icon(Icons.Filled.SelectAll, contentDescription = stringResource(R.string.select_all_description))
+            }
+            IconButton(onClick = onDeleteSelected, enabled = selectedItemCount > 0) {
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_selected_description))
+            }
+
+            // New "more options" menu for ignore actions
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(id = R.string.more_actions_description))
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(id = R.string.ignore_app_menu_item, selectedNotification?.appName ?: "")) },
+                        onClick = {
+                            selectedNotification?.let(onIgnoreApp)
+                            showMenu = false
+                        },
+                        enabled = selectedItemCount == 1 && selectedNotification != null,
+                        leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(id = R.string.create_filter_rule_menu_item)) },
+                        onClick = {
+                            selectedNotification?.let(onCreateRule)
+                            showMenu = false
+                        },
+                        enabled = selectedItemCount == 1 && selectedNotification != null,
+                        leadingIcon = { Icon(Icons.Default.FilterAlt, contentDescription = null) }
+                    )
+                }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        )
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateRuleDialog(
+    notification: CapturedNotification,
+    onDismiss: () -> Unit,
+    onSaveRule: (FilterRule) -> Unit
+) {
+    var titleKeyword by remember { mutableStateOf(notification.title ?: "") }
+    var contentKeyword by remember { mutableStateOf(notification.textContent ?: "") }
+    val context = LocalContext.current
+    val formattedAppName = HtmlCompat.fromHtml(
+        stringResource(id = R.string.rule_based_on_notification_from, notification.appName),
+        HtmlCompat.FROM_HTML_MODE_COMPACT
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(id = R.string.create_rule_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = AnnotatedString(formattedAppName.toString()))
+                OutlinedTextField(
+                    value = titleKeyword,
+                    onValueChange = { titleKeyword = it },
+                    label = { Text(stringResource(id = R.string.title_contains_label)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = contentKeyword,
+                    onValueChange = { contentKeyword = it },
+                    label = { Text(stringResource(id = R.string.content_contains_label)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Ignoring is case-insensitive. Leaving a field blank will ignore it.", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val newRule = FilterRule(
+                        appName = notification.appName,
+                        packageName = notification.packageName,
+                        titleKeyword = titleKeyword.takeIf { it.isNotBlank() },
+                        contentKeyword = contentKeyword.takeIf { it.isNotBlank() }
+                    )
+                    onSaveRule(newRule)
+                },
+                // A rule is valid if at least one keyword is not blank
+                enabled = titleKeyword.isNotBlank() || contentKeyword.isNotBlank()
+            ) {
+                Text(stringResource(id = R.string.save_rule_button))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(id = R.string.cancel_button))
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManageIgnoreRulesScreen(
+    ignoredApps: List<IgnoredApp>,
+    filterRules: List<FilterRule>,
+    onClose: () -> Unit,
+    onUnignoreApp: (IgnoredApp) -> Unit,
+    onDeleteRule: (FilterRule) -> Unit
+) {
+    val context = LocalContext.current
+    // Use a map to cache app names and icons
+    val appInfoCache = remember { mutableStateMapOf<String, Pair<String, Drawable?>>() }
+    LaunchedEffect(ignoredApps) {
+        val pm = context.packageManager
+        ignoredApps.forEach { app ->
+            if (!appInfoCache.containsKey(app.packageName)) {
+                try {
+                    val appInfo = pm.getApplicationInfo(app.packageName, 0)
+                    val appName = pm.getApplicationLabel(appInfo).toString()
+                    val appIcon = pm.getApplicationIcon(app.packageName)
+                    appInfoCache[app.packageName] = Pair(appName, appIcon)
+                } catch (e: PackageManager.NameNotFoundException) {
+                    appInfoCache[app.packageName] = Pair(app.packageName, null)
+                }
+            }
+        }
+    }
+
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(id = R.string.manage_rules_screen_title)) },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(id = R.string.close_screen_description))
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(vertical = 16.dp)
+        ) {
+            item {
+                Text(
+                    text = stringResource(id = R.string.ignored_apps_header),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            if (ignoredApps.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(id = R.string.no_ignored_apps_message),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else {
+                items(ignoredApps, key = { it.packageName }) { app ->
+                    val (appName, appIcon) = appInfoCache[app.packageName] ?: Pair(app.packageName, null)
+                    ListItem(
+                        headlineContent = { Text(appName) },
+                        leadingContent = {
+                            appIcon?.let {
+                                Image(
+                                    bitmap = it.toBitmap().asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                            }
+                        },
+                        trailingContent = {
+                            IconButton(onClick = { onUnignoreApp(app) }) {
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(id = R.string.unignore_app_description))
+                            }
+                        }
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = stringResource(id = R.string.custom_rules_header),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            if (filterRules.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(id = R.string.no_custom_rules_message),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else {
+                items(filterRules, key = { it.id }) { rule ->
+                    val description = buildAnnotatedString {
+                        val appName = rule.appName ?: stringResource(id = R.string.any_app_option)
+                        append(stringResource(id = R.string.rule_details_specific_app, appName))
+                        if (!rule.titleKeyword.isNullOrBlank() && !rule.contentKeyword.isNullOrBlank()) {
+                            append(" ")
+                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword), 0))
+                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_and), 0))
+                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
+                        } else if (!rule.titleKeyword.isNullOrBlank()) {
+                            append(" ")
+                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword),0))
+                        } else if (!rule.contentKeyword.isNullOrBlank()) {
+                            append(" ")
+                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
+                        }
+                    }
+                    ListItem(
+                        headlineContent = { Text(description) },
+                        trailingContent = {
+                            IconButton(onClick = { onDeleteRule(rule) }) {
+                                Icon(Icons.Default.Delete, contentDescription = stringResource(id = R.string.delete_rule_description))
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -466,7 +760,8 @@ fun DefaultTopAppBar(
     onSelectedAppNameForFilterChange: (String?) -> Unit,
     filterDropdownExpanded: Boolean,
     onFilterDropdownExpandedChange: (Boolean) -> Unit,
-    onShowDeleteAllDialog: () -> Unit
+    onShowDeleteAllDialog: () -> Unit,
+    onShowManageRules: () -> Unit
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -582,6 +877,16 @@ fun DefaultTopAppBar(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(id = R.string.manage_ignore_rules_menu_item)) },
+                            onClick = {
+                                showOverflowMenu = false
+                                onShowManageRules()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.FilterList, contentDescription = null)
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(id = R.string.delete_all_notifications_menu_item)) },
                             onClick = {
@@ -875,13 +1180,13 @@ private fun formatDateForIndicator(postTimeString: String): String {
 }
 
 // --- Previews ---
-@Preview(showBackground = true)
-@Composable
-fun NotificationAccessScreenPreview() {
-    NotificationVaultTheme {
-        NotificationAccessScreen {}
-    }
-}
+//@Preview(showBackground = true)
+//@Composable
+//fun NotificationAccessScreenPreview() {
+//    NotificationVaultTheme {
+//        NotificationAccessScreen {}
+//    }
+//}
 
 @Preview(showBackground = true, widthDp = 360)
 @Composable

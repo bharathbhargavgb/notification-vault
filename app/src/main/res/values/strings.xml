@@ -33,4 +33,33 @@
     <string name="confirm_delete_selected_title">Confirm Delete</string>
     <string name="confirm_delete_selected_message">Are you sure you want to delete %d notification(s)?</string>
     <string name="delete_button_confirm">Delete</string>
+
+    <string name="more_actions_description">More actions</string>
+    <string name="ignore_app_menu_item">Ignore all from %s</string>
+    <string name="create_filter_rule_menu_item">Create rule to ignore similar...</string>
+    <string name="manage_ignore_rules_menu_item">Manage Ignore Rules</string>
+
+    <string name="create_rule_dialog_title">Create Ignore Rule</string>
+    <string name="edit_rule_dialog_title">Edit Ignore Rule</string>
+    <string name="rule_based_on_notification_from">Rule based on a notification from \n<b>%s</b></string>
+    <string name="title_contains_label">Title contains</string>
+    <string name="content_contains_label">Content contains</string>
+    <string name="save_rule_button">Save Rule</string>
+    <string name="any_app_option">Any App</string>
+    <string name="app_label">App</string>
+
+    <string name="manage_rules_screen_title">Manage Ignore Rules</string>
+    <string name="ignored_apps_header">Ignored Apps</string>
+    <string name="custom_rules_header">Custom Rules</string>
+    <string name="no_ignored_apps_message">You haven\'t ignored any apps. Use the menu on a notification to ignore an app.</string>
+    <string name="no_custom_rules_message">You haven\'t created any custom rules. Use the menu on a notification to create a rule.</string>
+    <string name="unignore_app_description">Stop ignoring this app</string>
+    <string name="delete_rule_description">Delete this rule</string>
+    <string name="rule_details_any_app">For <b>Any App</b></string>
+    <string name="rule_details_specific_app">For <b>%s</b></string>
+    <string name="rule_details_title_contains">where <b>title contains</b> \"%s\"</string>
+    <string name="rule_details_content_contains">where <b>content contains</b> \"%s\"</string>
+    <string name="rule_details_and"> and </string>
+    <string name="close_screen_description">Close</string>
+
 </resources>
