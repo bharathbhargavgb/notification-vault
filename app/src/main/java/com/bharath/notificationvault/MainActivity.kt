@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -235,6 +236,10 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
         }
     }
 
+    BackHandler(enabled = isSelectionModeActive) {
+        viewModel.toggleSelectionMode()
+    }
+
     LaunchedEffect(Unit) { viewModel.cleanupOldNotifications() }
     LaunchedEffect(searchQuery) { viewModel.setSearchQuery(searchQuery.ifBlank { null }) }
     LaunchedEffect(isSearchActive) {
@@ -257,8 +262,6 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
         }
     }
 
-    // --- DIALOGS ---
-    // Dialogs can be placed at the top level of the composable logic.
     if (showDeleteAllDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteAllDialog = false },
@@ -302,8 +305,6 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
         )
     }
 
-    // --- SCREEN CONTENT SWITCH ---
-    // Use an if/else to swap between the main screen and the management screen.
     if (showManageRulesScreen) {
         ManageIgnoreRulesScreen(
             ignoredApps = ignoredApps,
@@ -619,6 +620,10 @@ fun ManageIgnoreRulesScreen(
     onUnignoreApp: (IgnoredApp) -> Unit,
     onDeleteRule: (FilterRule) -> Unit
 ) {
+    BackHandler {
+        onClose()
+    }
+
     val context = LocalContext.current
     // Use a map to cache app names and icons
     val appInfoCache = remember { mutableStateMapOf<String, Pair<String, Drawable?>>() }
@@ -1090,13 +1095,29 @@ fun FastScroller(
         val maxHeightPx = with(density) { maxHeight.toPx() }
         val thumbHeightDp = 64.dp
         val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
-        val scrollableHeightPx = maxHeightPx - thumbHeightPx
+        val scrollableTrackHeightPx = maxHeightPx - thumbHeightPx
 
         fun getThumbOffsetY(): Float {
-            val totalItems = listState.layoutInfo.totalItemsCount
-            if (totalItems == 0) return 0f
-            val scrollProportion = firstVisibleItem.toFloat() / (totalItems - 1).coerceAtLeast(1)
-            return (scrollableHeightPx * scrollProportion).coerceIn(0f, scrollableHeightPx)
+            val layoutInfo = listState.layoutInfo
+            val totalItemsCount = layoutInfo.totalItemsCount
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) return 0f
+
+            // Estimate the total content height based on the average height of visible items
+            val averageItemHeight = visibleItems.sumOf { it.size } / visibleItems.size.toFloat()
+            val estimatedTotalContentHeight = totalItemsCount * averageItemHeight
+
+            // Estimate the current scroll offset in pixels
+            val currentPixelOffset = listState.firstVisibleItemIndex * averageItemHeight + listState.firstVisibleItemScrollOffset
+
+            // Calculate the total scrollable range in pixels
+            val viewportHeight = layoutInfo.viewportSize.height
+            val totalScrollablePixelRange = (estimatedTotalContentHeight - viewportHeight).coerceAtLeast(0f)
+            if (totalScrollablePixelRange == 0f) return 0f
+
+            // Calculate the scroll proportion and the final thumb offset
+            val scrollProportion = currentPixelOffset / totalScrollablePixelRange
+            return (scrollableTrackHeightPx * scrollProportion).coerceIn(0f, scrollableTrackHeightPx)
         }
 
         val thumbOffsetY by remember { derivedStateOf { getThumbOffsetY() } }
@@ -1124,6 +1145,7 @@ fun FastScroller(
             }
         }
 
+        // The touchable area for the scroller
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -1138,8 +1160,8 @@ fun FastScroller(
                         onDragEnd = { isDragging = false },
                         onDragCancel = { isDragging = false }
                     ) { change, dragAmount ->
-                        val newOffset = (dragOffset + dragAmount).coerceIn(0f, scrollableHeightPx)
-                        val targetProportion = newOffset / scrollableHeightPx
+                        val newOffset = (dragOffset + dragAmount).coerceIn(0f, scrollableTrackHeightPx)
+                        val targetProportion = newOffset / scrollableTrackHeightPx
                         val totalItems = listState.layoutInfo.totalItemsCount
                         val targetIndex = ((totalItems - 1) * targetProportion)
                             .toInt()
@@ -1153,6 +1175,7 @@ fun FastScroller(
                     }
                 }
         ) {
+            // The visual representation of the thumb
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -1180,13 +1203,13 @@ private fun formatDateForIndicator(postTimeString: String): String {
 }
 
 // --- Previews ---
-//@Preview(showBackground = true)
-//@Composable
-//fun NotificationAccessScreenPreview() {
-//    NotificationVaultTheme {
-//        NotificationAccessScreen {}
-//    }
-//}
+@Preview(showBackground = true)
+@Composable
+fun NotificationAccessScreenPreview() {
+    NotificationVaultTheme {
+        NotificationAccessScreen {}
+    }
+}
 
 @Preview(showBackground = true, widthDp = 360)
 @Composable
