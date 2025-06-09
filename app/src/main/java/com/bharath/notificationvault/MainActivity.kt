@@ -217,6 +217,8 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
 
     var showManageRulesScreen by remember { mutableStateOf(false) }
     var notificationToCreateRuleFor by remember { mutableStateOf<CapturedNotification?>(null) }
+    var ruleToEdit by remember { mutableStateOf<FilterRule?>(null) }
+
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -294,13 +296,18 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
             }
         )
     }
-    notificationToCreateRuleFor?.let { notification ->
-        CreateRuleDialog(
-            notification = notification,
-            onDismiss = { notificationToCreateRuleFor = null },
+    if (notificationToCreateRuleFor != null || ruleToEdit != null) {
+        CreateOrEditRuleDialog(
+            notificationForNewRule = notificationToCreateRuleFor,
+            existingRule = ruleToEdit,
+            onDismiss = {
+                notificationToCreateRuleFor = null
+                ruleToEdit = null
+            },
             onSaveRule = {
                 viewModel.saveFilterRule(it)
                 notificationToCreateRuleFor = null
+                ruleToEdit = null
             }
         )
     }
@@ -311,7 +318,8 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
             filterRules = filterRules,
             onClose = { showManageRulesScreen = false },
             onUnignoreApp = { viewModel.unignoreApp(it.packageName) },
-            onDeleteRule = { viewModel.deleteFilterRule(it) }
+            onDeleteRule = { viewModel.deleteFilterRule(it) },
+            onEditRule = { ruleToEdit = it }
         )
     } else {
         Scaffold(
@@ -328,11 +336,11 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
                         },
                         onIgnoreApp = { notification ->
                             viewModel.ignoreApp(notification.packageName)
-                            viewModel.toggleSelectionMode() // Exit selection mode after action
+                            viewModel.toggleSelectionMode()
                         },
                         onCreateRule = { notification ->
                             notificationToCreateRuleFor = notification
-                            viewModel.toggleSelectionMode() // Exit selection mode after action
+                            viewModel.toggleSelectionMode()
                         }
                     )
                 } else {
@@ -552,25 +560,33 @@ fun SelectionModeTopAppBar(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreateRuleDialog(
-    notification: CapturedNotification,
+fun CreateOrEditRuleDialog(
+    notificationForNewRule: CapturedNotification?,
+    existingRule: FilterRule?,
     onDismiss: () -> Unit,
     onSaveRule: (FilterRule) -> Unit
 ) {
-    var titleKeyword by remember { mutableStateOf(notification.title ?: "") }
-    var contentKeyword by remember { mutableStateOf(notification.textContent ?: "") }
-    val context = LocalContext.current
+    val isEditMode = existingRule != null
+    val initialTitle = existingRule?.titleKeyword ?: notificationForNewRule?.title ?: ""
+    val initialContent = existingRule?.contentKeyword ?: notificationForNewRule?.textContent ?: ""
+    val appName = existingRule?.appName ?: notificationForNewRule?.appName ?: ""
+
+    var titleKeyword by remember { mutableStateOf(initialTitle) }
+    var contentKeyword by remember { mutableStateOf(initialContent) }
+
     val formattedAppName = HtmlCompat.fromHtml(
-        stringResource(id = R.string.rule_based_on_notification_from, notification.appName),
+        stringResource(id = R.string.rule_based_on_notification_from, appName),
         HtmlCompat.FROM_HTML_MODE_COMPACT
     )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(id = R.string.create_rule_dialog_title)) },
+        title = { Text(stringResource(id = if (isEditMode) R.string.edit_rule_dialog_title else R.string.create_rule_dialog_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = AnnotatedString(formattedAppName.toString()))
+                if (!isEditMode) {
+                    Text(text = AnnotatedString(formattedAppName.toString()))
+                }
                 OutlinedTextField(
                     value = titleKeyword,
                     onValueChange = { titleKeyword = it },
@@ -583,21 +599,21 @@ fun CreateRuleDialog(
                     label = { Text(stringResource(id = R.string.content_contains_label)) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text("Ignoring is case-insensitive. Leaving a field blank will ignore it.", style = MaterialTheme.typography.bodySmall)
+                Text("Ignoring is case-insensitive. Leaving a field blank means it won't be used for matching.", style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val newRule = FilterRule(
-                        appName = notification.appName,
-                        packageName = notification.packageName,
+                    val ruleToSave = FilterRule(
+                        id = existingRule?.id ?: 0,
+                        appName = existingRule?.appName ?: notificationForNewRule?.appName,
+                        packageName = existingRule?.packageName ?: notificationForNewRule?.packageName,
                         titleKeyword = titleKeyword.takeIf { it.isNotBlank() },
                         contentKeyword = contentKeyword.takeIf { it.isNotBlank() }
                     )
-                    onSaveRule(newRule)
+                    onSaveRule(ruleToSave)
                 },
-                // A rule is valid if at least one keyword is not blank
                 enabled = titleKeyword.isNotBlank() || contentKeyword.isNotBlank()
             ) {
                 Text(stringResource(id = R.string.save_rule_button))
@@ -618,14 +634,12 @@ fun ManageIgnoreRulesScreen(
     filterRules: List<FilterRule>,
     onClose: () -> Unit,
     onUnignoreApp: (IgnoredApp) -> Unit,
-    onDeleteRule: (FilterRule) -> Unit
+    onDeleteRule: (FilterRule) -> Unit,
+    onEditRule: (FilterRule) -> Unit
 ) {
-    BackHandler {
-        onClose()
-    }
+    BackHandler { onClose() }
 
     val context = LocalContext.current
-    // Use a map to cache app names and icons
     val appInfoCache = remember { mutableStateMapOf<String, Pair<String, Drawable?>>() }
     LaunchedEffect(ignoredApps) {
         val pm = context.packageManager
@@ -643,7 +657,6 @@ fun ManageIgnoreRulesScreen(
         }
     }
 
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -657,9 +670,7 @@ fun ManageIgnoreRulesScreen(
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
             item {
@@ -684,13 +695,7 @@ fun ManageIgnoreRulesScreen(
                     ListItem(
                         headlineContent = { Text(appName) },
                         leadingContent = {
-                            appIcon?.let {
-                                Image(
-                                    bitmap = it.toBitmap().asImageBitmap(),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(40.dp)
-                                )
-                            }
+                            appIcon?.let { Image(bitmap = it.toBitmap().asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp)) }
                         },
                         trailingContent = {
                             IconButton(onClick = { onUnignoreApp(app) }) {
@@ -726,23 +731,25 @@ fun ManageIgnoreRulesScreen(
                         val appName = rule.appName ?: stringResource(id = R.string.any_app_option)
                         append(stringResource(id = R.string.rule_details_specific_app, appName))
                         if (!rule.titleKeyword.isNullOrBlank() && !rule.contentKeyword.isNullOrBlank()) {
-                            append(" ")
-                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword), 0))
+                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword), 0))
                             append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_and), 0))
                             append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
                         } else if (!rule.titleKeyword.isNullOrBlank()) {
-                            append(" ")
-                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword),0))
+                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword),0))
                         } else if (!rule.contentKeyword.isNullOrBlank()) {
-                            append(" ")
-                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
+                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
                         }
                     }
                     ListItem(
                         headlineContent = { Text(description) },
                         trailingContent = {
-                            IconButton(onClick = { onDeleteRule(rule) }) {
-                                Icon(Icons.Default.Delete, contentDescription = stringResource(id = R.string.delete_rule_description))
+                            Row {
+                                IconButton(onClick = { onEditRule(rule) }) {
+                                    Icon(Icons.Default.Edit, contentDescription = stringResource(id = R.string.edit_rule_description))
+                                }
+                                IconButton(onClick = { onDeleteRule(rule) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = stringResource(id = R.string.delete_rule_description))
+                                }
                             }
                         }
                     )
