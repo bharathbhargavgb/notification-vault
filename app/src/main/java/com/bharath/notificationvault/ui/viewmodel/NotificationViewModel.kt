@@ -7,6 +7,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.asLiveData
+import androidx.lifecycle.liveData
 import androidx.lifecycle.map
 import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
@@ -79,8 +80,12 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         addSource(_searchQuery) { update() }
     }
 
-    val groupedNotifications: LiveData<List<NotificationListItem>> = notifications.map { flatList ->
-        groupNotificationsByDate(flatList)
+    val groupedNotifications: LiveData<List<NotificationListItem>> = notifications.switchMap { flatList ->
+        // Use the liveData builder to move the work to a background thread
+        liveData(context = viewModelScope.coroutineContext + Dispatchers.Default) {
+            val groupedList = groupNotificationsByDate(flatList)
+            emit(groupedList)
+        }
     }
 
 

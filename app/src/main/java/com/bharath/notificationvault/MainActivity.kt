@@ -64,6 +64,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.core.text.HtmlCompat
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -243,7 +244,12 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
     }
 
     LaunchedEffect(Unit) { viewModel.cleanupOldNotifications() }
-    LaunchedEffect(searchQuery) { viewModel.setSearchQuery(searchQuery.ifBlank { null }) }
+    LaunchedEffect(searchQuery) {
+        // Wait for 300ms of inactivity before triggering the search.
+        // If the user types again, this coroutine is cancelled and restarted.
+        delay(300L)
+        viewModel.setSearchQuery(searchQuery.ifBlank { null })
+    }
     LaunchedEffect(isSearchActive) {
         if (isSearchActive) {
             try {
