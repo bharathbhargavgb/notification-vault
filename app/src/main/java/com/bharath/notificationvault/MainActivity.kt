@@ -450,36 +450,44 @@ fun NotificationListContent(
     } else {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
-                groupedItems.forEach { listItem ->
+                items(
+                    items = groupedItems,
+                    key = { item ->
+                        when (item) {
+                            is NotificationListItem.HeaderItem -> item.date
+                            is NotificationListItem.SubHeaderItem -> item.id
+                            is NotificationListItem.NotificationItem -> item.notification.id
+                        }
+                    }
+                ) { listItem ->
+                    // The content for each item remains the same
                     when (listItem) {
                         is NotificationListItem.HeaderItem -> {
-                            stickyHeader(key = listItem.date) { DateHeader(text = listItem.date) }
+                            DateHeader(text = listItem.date)
                         }
                         is NotificationListItem.SubHeaderItem -> {
-                            item(key = listItem.id) { TimeOfDayHeader(text = listItem.timeOfDay) }
+                            TimeOfDayHeader(text = listItem.timeOfDay)
                         }
                         is NotificationListItem.NotificationItem -> {
                             val notification = listItem.notification
-                            item(key = notification.id) {
-                                val isSelected = selectedNotificationIds.contains(notification.id)
-                                NotificationItem(
-                                    notification = notification,
-                                    context = context,
-                                    searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
-                                    isSelected = isSelected,
-                                    isSelectionModeActive = isSelectionModeActive,
-                                    onItemClick = {
-                                        if (isSelectionModeActive) {
-                                            viewModel.toggleNotificationSelection(notification.id)
-                                        }
-                                    },
-                                    onItemLongClick = {
-                                        viewModel.activateSelectionMode(notification.id)
-                                    },
-                                    iconCache = iconCache
-                                )
-                                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-                            }
+                            val isSelected = selectedNotificationIds.contains(notification.id)
+                            NotificationItem(
+                                notification = notification,
+                                context = context,
+                                searchQuery = if (searchQuery?.isNotBlank() == true) searchQuery else null,
+                                isSelected = isSelected,
+                                isSelectionModeActive = isSelectionModeActive,
+                                onItemClick = {
+                                    if (isSelectionModeActive) {
+                                        viewModel.toggleNotificationSelection(notification.id)
+                                    }
+                                },
+                                onItemLongClick = {
+                                    viewModel.activateSelectionMode(notification.id)
+                                },
+                                iconCache = iconCache
+                            )
+                            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
