@@ -356,7 +356,8 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
                         filterDropdownExpanded = filterDropdownExpanded,
                         onFilterDropdownExpandedChange = { filterDropdownExpanded = it },
                         onShowDeleteAllDialog = { showDeleteAllDialog = true },
-                        onShowManageRules = { showManageRulesScreen = true }
+                        onShowManageRules = { showManageRulesScreen = true },
+                        focusRequester = focusRequester
                     )
                 }
             }
@@ -773,11 +774,11 @@ fun DefaultTopAppBar(
     filterDropdownExpanded: Boolean,
     onFilterDropdownExpandedChange: (Boolean) -> Unit,
     onShowDeleteAllDialog: () -> Unit,
-    onShowManageRules: () -> Unit
+    onShowManageRules: () -> Unit,
+    focusRequester: FocusRequester
 ) {
     var showOverflowMenu by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
-    val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     TopAppBar(
         title = {
