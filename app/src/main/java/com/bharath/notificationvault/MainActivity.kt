@@ -14,6 +14,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -28,9 +33,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,9 +49,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -51,18 +70,22 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.center
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.text.HtmlCompat
 
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -790,66 +813,43 @@ fun DefaultTopAppBar(
     var showOverflowMenu by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    TopAppBar(
-        title = {
-            if (!isSearchActive) {
-                Text(stringResource(id = R.string.notifications_screen_title))
-            }
-        },
-        actions = {
-            if (isSearchActive) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .padding(end = 8.dp),
-                    placeholder = { Text("Search...") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                    }),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            if (searchQuery.isNotEmpty()) {
-                                onSearchQueryChange("")
-                            } else {
-                                onSearchActiveChange(false)
-                            }
-                        }) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = if (searchQuery.isNotEmpty()) stringResource(id = R.string.clear_search_description) else stringResource(
-                                    id = R.string.close_search_description
-                                )
-                            )
-                        }
-                    },
-                    colors = TextFieldDefaults.colors()
-                )
-            }
+    var searchIconOffset by remember { mutableStateOf(Offset.Zero) }
+    var boxCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
-            if (!isSearchActive) {
-                IconButton(onClick = { onSearchActiveChange(true) }) {
+    Box(
+        modifier = Modifier.onGloballyPositioned {
+            boxCoordinates = it
+        }
+    ) {
+        // Normal TopAppBar
+        TopAppBar(
+            title = { Text(stringResource(id = R.string.notifications_screen_title)) },
+            actions = {
+                IconButton(
+                    onClick = { onSearchActiveChange(true) },
+                    modifier = Modifier.onGloballyPositioned { iconCoordinates ->
+                        boxCoordinates?.let {
+                            val iconOffsetInRoot = iconCoordinates.positionInRoot()
+                            val boxOffsetInRoot = it.positionInRoot()
+                            val center = iconCoordinates.size.center
+                            searchIconOffset = (iconOffsetInRoot - boxOffsetInRoot) +
+                                    Offset(center.x.toFloat(), center.y.toFloat())
+                        }
+                    }
+                ) {
                     Icon(
                         Icons.Filled.Search,
                         contentDescription = stringResource(id = R.string.open_search_description)
                     )
                 }
-            }
-
-            Box {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(MaterialTheme.shapes.small)
-                        .clickable { onFilterDropdownExpandedChange(true) }
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
-                ) {
-                    if (!isSearchActive) {
+                Box {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable { onFilterDropdownExpandedChange(true) }
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                    ) {
                         Text(
                             text = selectedAppNameForFilter?.take(10)
                                 ?: stringResource(id = R.string.all_apps_filter_short),
@@ -857,38 +857,35 @@ fun DefaultTopAppBar(
                             maxLines = 1,
                             modifier = Modifier.padding(end = 2.dp)
                         )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = stringResource(id = R.string.filter_by_app_description)
+                        )
                     }
-                    Icon(
-                        imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = stringResource(id = R.string.filter_by_app_description)
-                    )
-                }
-                DropdownMenu(
-                    expanded = filterDropdownExpanded,
-                    onDismissRequest = { onFilterDropdownExpandedChange(false) }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(id = R.string.all_apps_filter)) },
-                        onClick = {
-                            onSelectedAppNameForFilterChange(null)
-                            viewModel.setAppFilter(null)
-                            onFilterDropdownExpandedChange(false)
-                        }
-                    )
-                    appNamesForFilter.forEach { appName ->
+                    DropdownMenu(
+                        expanded = filterDropdownExpanded,
+                        onDismissRequest = { onFilterDropdownExpandedChange(false) }
+                    ) {
                         DropdownMenuItem(
-                            text = { Text(appName) },
+                            text = { Text(stringResource(id = R.string.all_apps_filter)) },
                             onClick = {
-                                onSelectedAppNameForFilterChange(appName)
-                                viewModel.setAppFilter(appName)
+                                onSelectedAppNameForFilterChange(null)
+                                viewModel.setAppFilter(null)
                                 onFilterDropdownExpandedChange(false)
                             }
                         )
+                        appNamesForFilter.forEach { appName ->
+                            DropdownMenuItem(
+                                text = { Text(appName) },
+                                onClick = {
+                                    onSelectedAppNameForFilterChange(appName)
+                                    viewModel.setAppFilter(appName)
+                                    onFilterDropdownExpandedChange(false)
+                                }
+                            )
+                        }
                     }
                 }
-            }
-
-            if (!isSearchActive) {
                 Box {
                     IconButton(onClick = { showOverflowMenu = true }) {
                         Icon(
@@ -922,16 +919,101 @@ fun DefaultTopAppBar(
                         )
                     }
                 }
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            titleContentColor = MaterialTheme.colorScheme.onPrimary,
-            actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+            )
         )
-    )
-}
 
+        // The Search UI that is revealed on top
+        CircularReveal(
+            visible = isSearchActive,
+            revealFrom = searchIconOffset
+        ) {
+            TopAppBar(
+                title = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // THIS IS THE CORRECTED PART
+                        val textStyle = TextStyle(
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 17.sp
+                        )
+
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChange,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester),
+                            singleLine = true,
+                            textStyle = textStyle, // Apply the style to the input text
+                            keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }),
+                            decorationBox = { innerTextField ->
+                                Row(
+                                    modifier = Modifier
+                                        .background(
+                                            MaterialTheme.colorScheme.surface,
+                                            RoundedCornerShape(24.dp)
+                                        )
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        innerTextField()
+                                        if (searchQuery.isEmpty()) {
+                                            Text(
+                                                text = "Search...",
+                                                // Apply the same style to the placeholder, but with a different color
+                                                style = textStyle.copy(
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = { onSearchActiveChange(false) }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(id = R.string.close_search_description)
+                        )
+                    }
+                },
+                actions = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(id = R.string.clear_search_description)
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1221,6 +1303,60 @@ private fun formatDateForIndicator(postTimeString: String): String {
         date?.let { outputFormat.format(it) } ?: ""
     } catch (e: Exception) {
         ""
+    }
+}
+
+/**
+ * A composable that reveals its content using a circular animation.
+ *
+ * @param visible Whether the content should be visible.
+ * @param modifier Modifier for the layout.
+ * @param animationSpec The animation spec to use for the reveal.
+ * @param content The content to be revealed.
+ */
+@SuppressLint("UnusedBoxWithConstraintsScope")
+@Composable
+fun CircularReveal(
+    visible: Boolean,
+    revealFrom: Offset,
+    modifier: Modifier = Modifier,
+    animationSpec: FiniteAnimationSpec<Float> = tween(500),
+    content: @Composable () -> Unit
+) {
+    val transition = updateTransition(targetState = visible, label = "CircularReveal")
+
+    BoxWithConstraints(modifier) {
+        val width = constraints.maxWidth.toFloat()
+        val height = constraints.maxHeight.toFloat()
+
+        // The final radius is the diagonal of the composable, ensuring it covers the whole area.
+        val radius = sqrt(width * width + height * height)
+
+        val animatedRadius by transition.animateFloat(
+            transitionSpec = { animationSpec },
+            label = "revealRadius"
+        ) { isVisible ->
+            if (isVisible) radius else 0f
+        }
+
+        val clipPathModifier = Modifier.graphicsLayer(
+            clip = true,
+            shape = object : Shape {
+                override fun createOutline(
+                    size: Size,
+                    layoutDirection: LayoutDirection,
+                    density: Density
+                ): Outline {
+                    val path = Path().apply {
+                        addOval(Rect(center = revealFrom, radius = animatedRadius))
+                    }
+                    return Outline.Generic(path)
+                }
+            }
+        )
+        Box(modifier = clipPathModifier) {
+            content()
+        }
     }
 }
 
