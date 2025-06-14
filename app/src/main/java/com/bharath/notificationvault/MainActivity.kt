@@ -228,6 +228,7 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
     val tabTitles = listOf("All", "Dismissed")
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     val pagerState = rememberPagerState { tabTitles.size }
+    val iconCache = remember { mutableStateMapOf<String, Drawable?>() }
     val coroutineScope = rememberCoroutineScope()
 
     val selectedNotification = remember(selectedNotificationIds.size, notifications) {
@@ -394,7 +395,8 @@ fun NotificationScreenWithTabs(viewModel: NotificationViewModel) {
                         viewModel = viewModel,
                         searchQuery = searchQuery,
                         isSelectionModeActive = isSelectionModeActive,
-                        selectedNotificationIds = selectedNotificationIds
+                        selectedNotificationIds = selectedNotificationIds,
+                        iconCache = iconCache
                     )
                 }
             }
@@ -411,7 +413,8 @@ fun NotificationListContent(
     viewModel: NotificationViewModel,
     searchQuery: String?,
     isSelectionModeActive: Boolean,
-    selectedNotificationIds: List<Long>
+    selectedNotificationIds: List<Long>,
+    iconCache: MutableMap<String, Drawable?>
 ) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
@@ -449,7 +452,8 @@ fun NotificationListContent(
                                     },
                                     onItemLongClick = {
                                         viewModel.activateSelectionMode(notification.id)
-                                    }
+                                    },
+                                    iconCache = iconCache
                                 )
                                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                             }
@@ -970,17 +974,21 @@ fun NotificationItem(
     isSelected: Boolean,
     isSelectionModeActive: Boolean,
     onItemClick: () -> Unit,
-    onItemLongClick: () -> Unit
+    onItemLongClick: () -> Unit,
+    iconCache: MutableMap<String, Drawable?>
 ) {
-    var appIcon by remember { mutableStateOf<Drawable?>(null) }
-
     LaunchedEffect(notification.packageName) {
-        withContext(Dispatchers.IO) {
-            try {
-                appIcon = context.packageManager.getApplicationIcon(notification.packageName)
-            } catch (e: PackageManager.NameNotFoundException) {
-                Log.e("NotificationItem", "Icon not found for ${notification.packageName}", e)
-                appIcon = null
+        if (!iconCache.containsKey(notification.packageName)) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val icon = context.packageManager.getApplicationIcon(notification.packageName)
+                    // Put the loaded icon into the shared cache
+                    iconCache[notification.packageName] = icon
+                } catch (e: PackageManager.NameNotFoundException) {
+                    Log.e("NotificationItem", "Icon not found for ${notification.packageName}", e)
+                    // Cache the null to prevent trying again for this package
+                    iconCache[notification.packageName] = null
+                }
             }
         }
     }
@@ -1030,9 +1038,9 @@ fun NotificationItem(
             )
         } else {
             Box(modifier = Modifier.size(40.dp).padding(end = 8.dp), contentAlignment = Alignment.Center) {
-                appIcon?.let {
+                iconCache[notification.packageName]?.let { appIcon ->
                     Image(
-                        bitmap = it.toBitmap().asImageBitmap(),
+                        bitmap = appIcon.toBitmap().asImageBitmap(),
                         contentDescription = "${notification.appName} icon",
                         modifier = Modifier.size(36.dp)
                     )
@@ -1244,7 +1252,8 @@ fun NotificationItemPreview() {
             isSelected = false,
             isSelectionModeActive = false,
             onItemClick = {},
-            onItemLongClick = {}
+            onItemLongClick = {},
+            iconCache = mutableMapOf()
         )
     }
 }
@@ -1268,7 +1277,8 @@ fun NotificationItemPreviewSelectionModeActive() {
             isSelected = false,
             isSelectionModeActive = true,
             onItemClick = {},
-            onItemLongClick = {}
+            onItemLongClick = {},
+            iconCache = mutableMapOf()
         )
     }
 }
@@ -1292,7 +1302,8 @@ fun NotificationItemPreviewSelected() {
             isSelected = true,
             isSelectionModeActive = true,
             onItemClick = {},
-            onItemLongClick = {}
+            onItemLongClick = {},
+            iconCache = mutableMapOf()
         )
     }
 }
@@ -1316,7 +1327,8 @@ fun NotificationItemNoContentPreview() {
             isSelected = false,
             isSelectionModeActive = false,
             onItemClick = {},
-            onItemLongClick = {}
+            onItemLongClick = {},
+            iconCache = mutableMapOf()
         )
     }
 }
