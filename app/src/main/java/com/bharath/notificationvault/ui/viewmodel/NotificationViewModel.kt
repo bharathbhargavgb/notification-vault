@@ -52,7 +52,23 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         _packageNameForQuery.switchMap { pkgName ->
             val source = when (tab) {
                 0 -> if (pkgName == null) repository.allNotificationsLast7Days else repository.getNotificationsByAppLast7Days(pkgName)
-                1 -> if (pkgName == null) repository.dismissedNotificationsLast7Days else repository.getNotificationsByAppLast7Days(pkgName).map { list -> list.filter { it.isDismissed } }
+                1 -> { // Logic for the "Dismissed" tab
+                    // 1. Get the base list. For "All Apps", get all notifications.
+                    //    This now mirrors the logic for the specific-app case.
+                    val sourceList = if (pkgName == null) {
+                        repository.allNotificationsLast7Days
+                    } else {
+                        repository.getNotificationsByAppLast7Days(pkgName)
+                    }
+
+                    // 2. Apply transformations to the base list in the ViewModel
+                    sourceList.map { list ->
+                        // First, filter the list to only include dismissed items
+                        val dismissedOnly = list.filter { it.isDismissed }
+                        // Then, sort the filtered list by dismissal time, newest first
+                        dismissedOnly.sortedByDescending { it.dismissalTimeMillis }
+                    }
+                }
                 else -> repository.allNotificationsLast7Days
             }
             source

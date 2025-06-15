@@ -78,8 +78,4 @@ class NotificationRepository(
     suspend fun deleteAllNotifications() {
         notificationDao.deleteAll()
     }
-
-    suspend fun markAsDismissed(key: String) {
-        notificationDao.markAsDismissed(key)
-    }
 }

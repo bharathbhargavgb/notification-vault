@@ -106,7 +106,7 @@ class NotificationListenerService : NotificationListenerService() {
             sbn?.let { statusBarNotification ->
                 serviceScope.launch {
                     try {
-                        notificationDao.markAsDismissed(statusBarNotification.key)
+                        notificationDao.markAsDismissed(statusBarNotification.key, System.currentTimeMillis())
                         Log.d(
                             TAG,
                             "Notification marked as user-dismissed: ${statusBarNotification.packageName}"
