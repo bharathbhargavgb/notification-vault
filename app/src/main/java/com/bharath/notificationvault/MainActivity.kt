@@ -495,7 +495,7 @@ fun NotificationListContent(
             }
             FastScroller(
                 listState = listState,
-                notifications = notifications,
+                groupedItems = groupedItems,
                 modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight()
             ) { targetIndex ->
                 coroutineScope.launch { listState.scrollToItem(targetIndex) }
@@ -1229,7 +1229,7 @@ fun NotificationItem(
 @Composable
 fun FastScroller(
     listState: LazyListState,
-    notifications: List<CapturedNotification>,
+    groupedItems: List<NotificationListItem>, // Changed parameter from `notifications`
     modifier: Modifier = Modifier,
     onScroll: (targetIndex: Int) -> Unit
 ) {
@@ -1253,45 +1253,52 @@ fun FastScroller(
             val visibleItems = layoutInfo.visibleItemsInfo
             if (visibleItems.isEmpty()) return 0f
 
-            // Estimate the total content height based on the average height of visible items
             val averageItemHeight = visibleItems.sumOf { it.size } / visibleItems.size.toFloat()
             val estimatedTotalContentHeight = totalItemsCount * averageItemHeight
-
-            // Estimate the current scroll offset in pixels
             val currentPixelOffset = listState.firstVisibleItemIndex * averageItemHeight + listState.firstVisibleItemScrollOffset
-
-            // Calculate the total scrollable range in pixels
             val viewportHeight = layoutInfo.viewportSize.height
             val totalScrollablePixelRange = (estimatedTotalContentHeight - viewportHeight).coerceAtLeast(0f)
             if (totalScrollablePixelRange == 0f) return 0f
 
-            // Calculate the scroll proportion and the final thumb offset
             val scrollProportion = currentPixelOffset / totalScrollablePixelRange
             return (scrollableTrackHeightPx * scrollProportion).coerceIn(0f, scrollableTrackHeightPx)
         }
 
         val thumbOffsetY by remember { derivedStateOf { getThumbOffsetY() } }
 
-        if (isDragging && firstVisibleItem < notifications.size) {
-            val dateString = formatDateForIndicator(notifications[firstVisibleItem].postTimeString)
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(
-                        x = (-56).dp,
-                        y = with(density) { thumbOffsetY.toDp() }
-                    ),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-                tonalElevation = 8.dp
-            ) {
-                Text(
-                    text = dateString,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    fontSize = 14.sp,
-                    maxLines = 1
-                )
+        if (isDragging && firstVisibleItem < groupedItems.size) {
+            // Find the first actual NotificationItem at or after the current visible index
+            var relevantNotification: CapturedNotification? = null
+            for (i in firstVisibleItem until groupedItems.size) {
+                val item = groupedItems[i]
+                if (item is NotificationListItem.NotificationItem) {
+                    relevantNotification = item.notification
+                    break
+                }
+            }
+
+            // If we found a notification, display its date in the bubble
+            relevantNotification?.let { notification ->
+                val dateString = formatDateForIndicator(notification.postTimeString)
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(
+                            x = (-56).dp,
+                            y = with(density) { thumbOffsetY.toDp() }
+                        ),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
+                    tonalElevation = 8.dp
+                ) {
+                    Text(
+                        text = dateString,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        fontSize = 14.sp,
+                        maxLines = 1
+                    )
+                }
             }
         }
 
