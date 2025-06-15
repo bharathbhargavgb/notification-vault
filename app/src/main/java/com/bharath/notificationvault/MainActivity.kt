@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -732,7 +733,7 @@ fun ManageIgnoreRulesScreen(
                     )
                 }
             } else {
-                items(ignoredApps, key = { it.packageName }) { app ->
+                itemsIndexed(ignoredApps, key = { _, app -> app.packageName }) { index, app ->
                     val (appName, appIcon) = appInfoCache[app.packageName] ?: Pair(app.packageName, null)
                     ListItem(
                         headlineContent = { Text(appName) },
@@ -745,6 +746,10 @@ fun ManageIgnoreRulesScreen(
                             }
                         }
                     )
+                    // Add a divider after each item except the last one
+                    if (index < ignoredApps.lastIndex) {
+                        HorizontalDivider()
+                    }
                 }
             }
 
@@ -768,20 +773,50 @@ fun ManageIgnoreRulesScreen(
                     )
                 }
             } else {
-                items(filterRules, key = { it.id }) { rule ->
+                itemsIndexed(filterRules, key = { _, rule -> rule.id }) { index, rule ->
                     val description = buildAnnotatedString {
-                        val appName = rule.appName ?: stringResource(id = R.string.any_app_option)
-                        append(stringResource(id = R.string.rule_details_specific_app, appName))
-                        if (!rule.titleKeyword.isNullOrBlank() && !rule.contentKeyword.isNullOrBlank()) {
-                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword), 0))
-                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_and), 0))
-                            append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
-                        } else if (!rule.titleKeyword.isNullOrBlank()) {
-                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_title_contains, rule.titleKeyword),0))
-                        } else if (!rule.contentKeyword.isNullOrBlank()) {
-                            append(" "); append(HtmlCompat.fromHtml(stringResource(id = R.string.rule_details_content_contains, rule.contentKeyword), 0))
+                        // Style the "For" prefix
+                        append(stringResource(R.string.rule_details_prefix))
+                        append(" ")
+                        // Apply bold style to the app name
+                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append(rule.appName ?: stringResource(id = R.string.any_app_option))
+                        }
+
+                        val titleKeyword = rule.titleKeyword
+                        val contentKeyword = rule.contentKeyword
+
+                        // Check if there are any keyword rules to display
+                        if (!titleKeyword.isNullOrBlank() || !contentKeyword.isNullOrBlank()) {
+                            append(" ")
+                            append(stringResource(id = R.string.rule_details_where))
+                            append(" ")
+                        }
+
+                        // Append the "title contains" rule if it exists
+                        if (!titleKeyword.isNullOrBlank()) {
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append(stringResource(id = R.string.rule_details_title_contains))
+                            }
+                            append(" \"$titleKeyword\"")
+                        }
+
+                        // Append the "and" separator if both rules exist
+                        if (!titleKeyword.isNullOrBlank() && !contentKeyword.isNullOrBlank()) {
+                            append(" ")
+                            append(stringResource(id = R.string.rule_details_and))
+                            append(" ")
+                        }
+
+                        // Append the "content contains" rule if it exists
+                        if (!contentKeyword.isNullOrBlank()) {
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append(stringResource(id = R.string.rule_details_content_contains))
+                            }
+                            append(" \"$contentKeyword\"")
                         }
                     }
+
                     ListItem(
                         headlineContent = { Text(description) },
                         trailingContent = {
@@ -795,6 +830,9 @@ fun ManageIgnoreRulesScreen(
                             }
                         }
                     )
+                    if (index < filterRules.lastIndex) {
+                        HorizontalDivider()
+                    }
                 }
             }
         }

@@ -56,11 +56,12 @@
     <string name="unignore_app_description">Stop ignoring this app</string>
     <string name="delete_rule_description">Delete this rule</string>
     <string name="edit_rule_description">Edit this rule</string>
-    <string name="rule_details_any_app">For <b>Any App</b></string>
     <string name="rule_details_specific_app">For <b>%s</b></string>
-    <string name="rule_details_title_contains">where <b>title contains</b> \"%s\"</string>
-    <string name="rule_details_content_contains">where <b>content contains</b> \"%s\"</string>
-    <string name="rule_details_and"> and </string>
+    <string name="rule_details_prefix">For</string>
+    <string name="rule_details_where">where</string>
+    <string name="rule_details_title_contains">title contains</string>
+    <string name="rule_details_content_contains">content contains</string>
+    <string name="rule_details_and">and</string>
     <string name="close_screen_description">Close</string>
 
 </resources>
