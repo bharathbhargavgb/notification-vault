@@ -196,11 +196,7 @@ class NotificationViewModel(private val repository: NotificationRepository) : Vi
         return items
     }
 
-    // The list of unique app names for the filter is now derived from the final,
-    // filtered list of notifications, ensuring it's always up-to-date.
-    val uniqueAppNamesForFilter: LiveData<List<String>> = notifications.map { notificationList ->
-        notificationList.map { it.appName }.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
-    }
+    val uniqueAppNamesForFilter: LiveData<List<String>> = repository.uniqueAppNamesForFilter
 
     fun setAppFilter(appName: String?) {
         _selectedAppNameFilter.value = appName
